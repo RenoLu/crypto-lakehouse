@@ -35,6 +35,10 @@ ENV/
 *.swo
 *~
 
+# Vercel
+.vercel/
+.vercelignore
+
 # OS
 .DS_Store
 Thumbs.db

@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    binance_base_url: str = "https://api3.binance.com"
+    binance_base_url: str = "https://data-api.binance.vision"
     duckdb_path: str = "./data/duckdb/lakehouse.duckdb"
     lakehouse_root: str = "./data/lakehouse"
     ollama_base_url: str = "http://localhost:11434"
@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     candle_limit: int = 1000
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    polling_enabled: bool = False
+    polling_interval_seconds: int = 60
 
     @property
     def symbols(self) -> list[str]:

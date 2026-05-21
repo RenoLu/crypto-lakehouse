@@ -110,3 +110,22 @@ export async function askAssistant(question: string) {
   }
   return res.json() as Promise<AssistantResponse>;
 }
+
+export async function getPollingStatus() {
+  return fetchApi<{ enabled: boolean; interval_seconds: number; symbols: string[]; intervals: string[] }>('/polling/status');
+}
+
+export async function triggerPipeline() {
+  const res = await fetch(`${API_BASE}/polling/trigger`, { method: 'POST' });
+  if (!res.ok) {
+    throw new Error(`Pipeline trigger failed: ${res.status}`);
+  }
+  return res.json() as Promise<{
+    timestamp: string;
+    records_ingested: number;
+    silver_files: number;
+    gold_datasets: number;
+    quality_breaks: number;
+    errors: string[];
+  }>;
+}

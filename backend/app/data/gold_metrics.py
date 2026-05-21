@@ -117,14 +117,24 @@ def compute_portfolio_exposures(
     )
 
     merged = merged.with_columns([
-        (pl.col("quantity") * pl.col("close")).alias("market_value"),
+        pl.when(pl.col("symbol") == "CASH")
+        .then(pl.col("quantity"))
+        .otherwise(pl.col("quantity") * pl.col("close").fill_null(1.0))
+        .alias("market_value"),
+    ])
+
+    merged = merged.with_columns([
+        pl.when(pl.col("symbol") == "CASH")
+        .then(0.0)
+        .otherwise(pl.col("daily_return").fill_null(0.0))
+        .alias("daily_return"),
     ])
 
     total_nav = merged["market_value"].sum()
     if total_nav > 0:
         merged = merged.with_columns([
             (pl.col("market_value") / total_nav * 100).alias("allocation_pct"),
-            (pl.col("market_value") * pl.col("daily_return").fill_null(0)).alias("daily_pnl"),
+            (pl.col("market_value") * pl.col("daily_return")).alias("daily_pnl"),
         ])
 
     merged = merged.with_columns([
