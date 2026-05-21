@@ -48,13 +48,18 @@ class DuckDBRepo:
             except Exception as e:
                 logger.warning(f"Failed to create view {name}: {e}")
 
-    def query(self, sql: str) -> list[dict]:
-        result = self.conn.execute(sql).fetchall()
+    def query(self, sql: str, params: dict | None = None) -> list[dict]:
+        if params:
+            result = self.conn.execute(sql, params).fetchall()
+        else:
+            result = self.conn.execute(sql).fetchall()
         columns = [desc[0] for desc in self.conn.description] if self.conn.description else []
         return [dict(zip(columns, row, strict=False)) for row in result]
 
-    def query_df(self, sql: str):
+    def query_df(self, sql: str, params: dict | None = None):
         import polars as pl
+        if params:
+            return pl.from_pandas(self.conn.execute(sql, params).fetchdf())
         return pl.from_pandas(self.conn.execute(sql).fetchdf())
 
     def table_exists(self, name: str) -> bool:

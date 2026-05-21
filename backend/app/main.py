@@ -1,8 +1,9 @@
 from contextlib import asynccontextmanager
 import asyncio
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
 
 from app.api.routes_analytics import router as analytics_router
 from app.api.routes_assets import router as assets_router
@@ -15,6 +16,15 @@ from app.api.routes_quality import router as quality_router
 from app.core.config import settings
 from app.core.logging import logger
 from app.core.polling import polling_loop
+
+
+ALLOWED_ORIGINS = [
+    "https://crypto-lakehouse.vercel.app",
+    "https://crypto-lakehouse-renolus-projects.vercel.app",
+    "https://crypto-lakehouse-git-master-renolus-projects.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
 
 
 @asynccontextmanager
@@ -48,11 +58,26 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    path = request.url.path
+    if path in ("/", "/health", "/docs", "/openapi.json", "/redoc") or path.startswith("/assets/"):
+        return await call_next(request)
+
+    api_key = settings.api_key
+    if api_key:
+        client_key = request.headers.get("X-API-Key", "")
+        if not client_key or client_key != api_key:
+            return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+
+    return await call_next(request)
 
 app.include_router(health_router, prefix="")
 app.include_router(assets_router, prefix="")

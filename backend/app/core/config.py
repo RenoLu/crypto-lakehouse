@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     api_port: int = 8000
     polling_enabled: bool = False
     polling_interval_seconds: int = 60
+    api_key: str = ""
 
     @property
     def symbols(self) -> list[str]:
