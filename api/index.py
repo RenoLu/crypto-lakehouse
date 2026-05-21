@@ -5,7 +5,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, Response
+from starlette.responses import FileResponse, Response, PlainTextResponse
 
 from mangum import Mangum
 
@@ -41,6 +41,17 @@ API_PREFIXES = (
 )
 
 
+@app.get("/__debug__", include_in_schema=False)
+async def debug():
+    return {
+        "frontend_dist": str(FRONTEND_DIST),
+        "frontend_dist_exists": FRONTEND_DIST.exists(),
+        "index_exists": (FRONTEND_DIST / "index.html").exists(),
+        "contents": [str(p) for p in FRONTEND_DIST.rglob("*")] if FRONTEND_DIST.exists() else [],
+        "cwd": str(Path.cwd()),
+    }
+
+
 class FrontendMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -64,7 +75,7 @@ class FrontendMiddleware(BaseHTTPMiddleware):
         if index.exists():
             return FileResponse(str(index))
 
-        return Response("Frontend not built", status_code=404)
+        return Response("Frontend not built: " + str(FRONTEND_DIST), status_code=404)
 
 
 app.add_middleware(FrontendMiddleware)
