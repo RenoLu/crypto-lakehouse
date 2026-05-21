@@ -1,18 +1,6 @@
-from mangum import Mangum
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
-
-app = FastAPI()
-
-
-@app.get("/")
-async def root():
-    return HTMLResponse("<h1>It works!</h1>")
-
-
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
-
-
-handler = Mangum(app)
+def handler(event, context):
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "text/html"},
+        "body": "<h1>It works! Pure Python handler</h1>"
+    }
