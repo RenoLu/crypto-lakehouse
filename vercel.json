@@ -2,17 +2,51 @@
   "version": 2,
   "builds": [
     {
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": { "distDir": "dist" }
+    },
+    {
       "src": "api/index.py",
       "use": "@vercel/python"
     }
   ],
   "routes": [
     {
-      "src": "/(.*)",
+      "src": "/health(.*)",
       "dest": "api/index.py"
+    },
+    {
+      "src": "/assets(.*)",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/market/(.*)",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/analytics/(.*)",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/portfolio/(.*)",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/quality/(.*)",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/assistant/(.*)",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/polling/(.*)",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "frontend/dist/$1"
     }
-  ],
-  "env": {
-    "PYTHONPATH": "."
-  }
+  ]
 }
