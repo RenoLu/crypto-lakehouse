@@ -4,11 +4,30 @@ BLOCKED_KEYWORDS = [
     "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE",
     "COPY", "ATTACH", "INSTALL", "LOAD", "PRAGMA", "REPLACE",
     "TRUNCATE", "MERGE", "GRANT", "REVOKE", "EXEC", "EXECUTE",
+    "UNION", "INTERSECT", "EXCEPT",
+]
+
+COMMENT_PATTERNS = [
+    r"/\*.*?\*/",  # Block comments
+    r"--[^\n]*",   # Line comments
+    r"#[^\n]*",    # MySQL-style comments
 ]
 
 
+def _strip_comments(sql: str) -> str:
+    for pattern in COMMENT_PATTERNS:
+        sql = re.sub(pattern, "", sql, flags=re.DOTALL | re.IGNORECASE)
+    return sql
+
+
+def _normalize_whitespace(sql: str) -> str:
+    sql = re.sub(r'\s+', ' ', sql)
+    return sql.strip()
+
+
 def is_safe_sql(sql: str) -> tuple[bool, str]:
-    normalized = sql.strip().upper()
+    cleaned = _strip_comments(sql)
+    normalized = _normalize_whitespace(cleaned).upper()
 
     if not normalized.startswith("SELECT"):
         return False, "Only SELECT statements are allowed"
@@ -18,11 +37,16 @@ def is_safe_sql(sql: str) -> tuple[bool, str]:
         if re.search(pattern, normalized):
             return False, f"Blocked keyword detected: {keyword}"
 
-    if ";" in normalized and len(normalized.split(";")) > 1:
+    if ";" in normalized:
         parts = [p.strip() for p in normalized.split(";") if p.strip()]
-        for part in parts:
-            if not part.upper().startswith("SELECT"):
-                return False, "Multiple statements detected; only single SELECT allowed"
+        if len(parts) > 1:
+            return False, "Multiple statements detected; only single SELECT allowed"
+
+    if re.search(r'0x[0-9a-f]+', normalized):
+        return False, "Hex encoding detected"
+
+    if re.search(r'char\s*\(', normalized):
+        return False, "CHAR() function detected"
 
     return True, "OK"
 

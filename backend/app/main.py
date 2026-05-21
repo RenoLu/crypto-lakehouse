@@ -16,6 +16,7 @@ from app.api.routes_quality import router as quality_router
 from app.core.config import settings
 from app.core.logging import logger
 from app.core.polling import polling_loop
+from app.core.rate_limiter import RateLimiter
 
 
 ALLOWED_ORIGINS = [
@@ -25,6 +26,8 @@ ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
 ]
+
+rate_limiter = RateLimiter(max_requests=60, window_seconds=60)
 
 
 @asynccontextmanager
@@ -66,10 +69,18 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def api_key_middleware(request: Request, call_next):
+async def security_middleware(request: Request, call_next):
     path = request.url.path
     if path in ("/", "/health", "/docs", "/openapi.json", "/redoc") or path.startswith("/assets/"):
         return await call_next(request)
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not rate_limiter.is_allowed(client_ip):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded. Try again later."},
+            headers={"Retry-After": "60"},
+        )
 
     api_key = settings.api_key
     if api_key:
