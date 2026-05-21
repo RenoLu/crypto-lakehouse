@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.core.logging import logger
 from app.data.binance_client import BinanceClient
 from app.data.bronze_writer import write_bronze_klines
+from app.data.retention import cleanup_old_data, get_dir_size_mb
 from app.data.gold_metrics import (
     compute_asset_daily_metrics,
     compute_asset_intraday_metrics,
@@ -141,6 +142,13 @@ async def polling_loop(interval_seconds: int = 60) -> None:
     logger.info(f"Background polling started (interval={interval_seconds}s)")
     while True:
         try:
+            cleanup = cleanup_old_data(max_size_mb=400.0)
+            if cleanup["cleaned"]:
+                logger.info(f"Retention cleanup: freed {cleanup['freed_mb']} MB")
+
+            current_size = get_dir_size_mb(settings.lakehouse_path)
+            logger.info(f"Storage usage: {current_size:.1f} MB")
+
             result = await asyncio.to_thread(run_pipeline_once)
             logger.info(
                 f"Pipeline complete: {result['records_ingested']} records, "
