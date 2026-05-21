@@ -149,7 +149,7 @@ async def polling_loop(interval_seconds: int = 60) -> None:
             current_size = get_dir_size_mb(settings.lakehouse_path)
             logger.info(f"Storage usage: {current_size:.1f} MB")
 
-            result = await asyncio.to_thread(run_pipeline_once)
+            result = await run_pipeline_once()
             logger.info(
                 f"Pipeline complete: {result['records_ingested']} records, "
                 f"{result['silver_files']} silver files, "

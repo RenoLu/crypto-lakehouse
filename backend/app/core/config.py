@@ -3,10 +3,13 @@ from pathlib import Path
 from pydantic_settings import BaseSettings
 
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+
+
 class Settings(BaseSettings):
     binance_base_url: str = "https://data-api.binance.vision"
-    duckdb_path: str = "./data/duckdb/lakehouse.duckdb"
-    lakehouse_root: str = "./data/lakehouse"
+    duckdb_path: str = str(PROJECT_ROOT / "data" / "duckdb" / "lakehouse.duckdb")
+    lakehouse_root: str = str(PROJECT_ROOT / "data" / "lakehouse")
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3:4b"
     default_symbols: str = "BTCUSDT,ETHUSDT,SOLUSDT"
@@ -28,7 +31,7 @@ class Settings(BaseSettings):
 
     @property
     def lakehouse_path(self) -> Path:
-        return Path(self.lakehouse_root).resolve()
+        return Path(self.lakehouse_root)
 
     @property
     def bronze_path(self) -> Path:
@@ -44,7 +47,7 @@ class Settings(BaseSettings):
 
     @property
     def duckdb_db_path(self) -> Path:
-        return Path(self.duckdb_path).resolve()
+        return Path(self.duckdb_path)
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

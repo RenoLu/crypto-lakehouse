@@ -50,7 +50,12 @@ class DuckDBRepo:
 
     def query(self, sql: str, params: dict | None = None) -> list[dict]:
         if params:
-            result = self.conn.execute(sql, params).fetchall()
+            # Convert named params (:name) to positional (?) for DuckDB
+            import re
+            param_names = re.findall(r':(\w+)', sql)
+            sql_positional = re.sub(r':(\w+)', '?', sql)
+            param_values = [params[name] for name in param_names]
+            result = self.conn.execute(sql_positional, param_values).fetchall()
         else:
             result = self.conn.execute(sql).fetchall()
         columns = [desc[0] for desc in self.conn.description] if self.conn.description else []
