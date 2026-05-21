@@ -3,10 +3,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
-from mangum import Mangum
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import FileResponse, Response
+
+from mangum import Mangum
 
 from app.main import app
 from app.core.config import settings
@@ -25,35 +26,47 @@ for d in [
 ]:
     d.mkdir(parents=True, exist_ok=True)
 
-API_PREFIXES = ("/health", "/assets", "/market", "/analytics", "/portfolio", "/quality", "/assistant", "/polling", "/docs", "/openapi.json", "/redoc")
+API_PREFIXES = (
+    "/health",
+    "/assets",
+    "/market",
+    "/analytics",
+    "/portfolio",
+    "/quality",
+    "/assistant",
+    "/polling",
+    "/docs",
+    "/openapi.json",
+    "/redoc",
+)
 
 
-class StaticFileMiddleware(BaseHTTPMiddleware):
+class FrontendMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        if path == "/" or (not path.startswith(API_PREFIXES) and not path.startswith("/api/")):
-            if path == "/" or path == "/index.html":
-                index = FRONTEND_DIST / "index.html"
-                if index.exists():
-                    return FileResponse(str(index))
+        if path.startswith(API_PREFIXES):
+            return await call_next(request)
 
-            if not path.startswith("/"):
-                path = "/" + path
-
-            file_path = FRONTEND_DIST / path.lstrip("/")
-            if file_path.is_file():
-                return FileResponse(str(file_path))
-
+        if path == "/" or path == "/index.html":
             index = FRONTEND_DIST / "index.html"
             if index.exists():
                 return FileResponse(str(index))
 
-            return Response("Frontend not built", status_code=404)
+        asset_path = FRONTEND_DIST / path.lstrip("/")
+        if asset_path.is_file():
+            return FileResponse(str(asset_path))
 
-        return await call_next(request)
+        if path.startswith("/assets/"):
+            return Response("Asset not found: " + path, status_code=404)
+
+        index = FRONTEND_DIST / "index.html"
+        if index.exists():
+            return FileResponse(str(index))
+
+        return Response("Frontend not built", status_code=404)
 
 
-app.add_middleware(StaticFileMiddleware)
+app.add_middleware(FrontendMiddleware)
 
 handler = Mangum(app)

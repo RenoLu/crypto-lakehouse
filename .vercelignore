@@ -1,0 +1,23 @@
+# Vercel build exclusions
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+data/lakehouse/bronze/
+data/lakehouse/silver/
+data/lakehouse/gold/
+data/duckdb/
+frontend/node_modules/
+frontend/src/
+frontend/tsconfig*
+frontend/vite.config.ts
+frontend/postcss.config.js
+frontend/tailwind.config.js
+frontend/package-lock.json
+docs/
+scripts/
+Makefile
+docker-compose.yml
