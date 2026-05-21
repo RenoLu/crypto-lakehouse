@@ -23,6 +23,7 @@ ALLOWED_ORIGINS = [
     "https://crypto-lakehouse.vercel.app",
     "https://crypto-lakehouse-renolus-projects.vercel.app",
     "https://crypto-lakehouse-git-master-renolus-projects.vercel.app",
+    "https://crypto-lakehouse-8tu4sh9e9-renolus-projects.vercel.app",
     "http://localhost:5173",
     "http://localhost:3000",
 ]
@@ -70,10 +71,6 @@ app.add_middleware(
 
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
-    path = request.url.path
-    if path in ("/", "/health", "/docs", "/openapi.json", "/redoc") or path.startswith("/assets/"):
-        return await call_next(request)
-
     client_ip = request.client.host if request.client else "unknown"
     if not rate_limiter.is_allowed(client_ip):
         return JSONResponse(
@@ -81,6 +78,10 @@ async def security_middleware(request: Request, call_next):
             content={"detail": "Rate limit exceeded. Try again later."},
             headers={"Retry-After": "60"},
         )
+
+    method = request.method
+    if method in ("GET", "HEAD", "OPTIONS"):
+        return await call_next(request)
 
     api_key = settings.api_key
     if api_key:
