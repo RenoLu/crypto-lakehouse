@@ -1,11 +1,12 @@
 import json
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
 
 from app.core.logging import logger
-from app.data.lake_paths import ensure_dir, silver_candles_dir
+from app.data.lake_paths import ensure_dir, silver_candles_dir, silver_symbol_interval_dir
 
 
 def transform_klines_to_silver(
@@ -60,6 +61,15 @@ def transform_klines_to_silver(
         "ingestion_time_utc": pl.Utf8,
     })
 
+    # Overlapping bronze snapshots (each ingest re-fetches the same recent window)
+    # produce duplicate candles. Silver is the conformed layer, so collapse to one
+    # row per candle, keeping the freshest ingestion. This keeps the build idempotent.
+    df = (
+        df.sort("ingestion_time_utc")
+        .unique(subset=["symbol", "interval", "open_time_utc"], keep="last", maintain_order=True)
+        .sort("open_time_utc")
+    )
+
     return df
 
 
@@ -112,4 +122,10 @@ def build_silver_for_symbol_interval(
         return Path("")
 
     df = transform_klines_to_silver(symbol, interval, klines, ingestion_time=dt)
+
+    # Silver is fully derived from bronze. Clear any prior silver for this
+    # symbol/interval (including stale run-date partitions) so each rebuild
+    # produces one deduplicated snapshot instead of accumulating duplicates.
+    shutil.rmtree(silver_symbol_interval_dir(symbol, interval), ignore_errors=True)
+
     return write_silver_candles(symbol, interval, df, dt=dt)

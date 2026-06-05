@@ -9,9 +9,13 @@ def bronze_kline_dir(symbol: str, interval: str, dt: date | None = None) -> Path
     return settings.bronze_path / "binance" / "klines" / f"symbol={symbol}" / f"interval={interval}" / f"date={d.isoformat()}"
 
 
+def silver_symbol_interval_dir(symbol: str, interval: str) -> Path:
+    return settings.silver_path / "market_candles" / "source=binance" / f"symbol={symbol}" / f"interval={interval}"
+
+
 def silver_candles_dir(symbol: str, interval: str, dt: date | None = None) -> Path:
     d = dt or datetime.now(UTC).date()
-    return settings.silver_path / "market_candles" / "source=binance" / f"symbol={symbol}" / f"interval={interval}" / f"date={d.isoformat()}"
+    return silver_symbol_interval_dir(symbol, interval) / f"date={d.isoformat()}"
 
 
 def gold_daily_metrics_dir() -> Path:
