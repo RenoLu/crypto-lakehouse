@@ -1,0 +1,59 @@
+name: Refresh lakehouse + forecast snapshot
+
+# Generates a consistent synthetic data snapshot (silver + gold incl. Kronos
+# predictions) on a free runner and commits it to main, so Render can serve the
+# forecast read-only (it can't run torch on the free tier). Not triggered by
+# push, so committing the snapshot back does not loop.
+
+on:
+  schedule:
+    - cron: "0 */12 * * *"   # every 12h (under the 24h stale_price threshold)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cache Hugging Face weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-kronos-small-v1
+
+      - name: Install (with predict extra)
+        run: pip install -e ".[predict]"
+
+      - name: Build snapshot (synthetic data + Kronos forecast)
+        run: |
+          python scripts/seed_demo_data.py
+          python scripts/generate_synthetic_data.py
+          python scripts/build_silver.py
+          python scripts/build_gold.py
+          python scripts/run_quality_checks.py
+          python scripts/build_predictions.py
+
+      - name: Commit snapshot to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f data/lakehouse/silver data/lakehouse/gold
+          if git diff --cached --quiet; then
+            echo "No snapshot changes to commit."
+          else
+            git commit -m "chore(data): refresh lakehouse + forecast snapshot [skip ci]"
+            git push
+          fi
