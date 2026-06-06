@@ -1,15 +1,30 @@
-import numpy as np
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.config import settings
 from app.core.logging import logger
-from app.data.backtest import per_anchor_metrics
 from app.data.duckdb_repo import DuckDBRepo
 from app.models.api_models import BacktestMetricsResponse, BacktestReplayResponse
 
 router = APIRouter(tags=["backtest"])
 
 VALID_SYMBOLS = {"BTCUSDT", "ETHUSDT", "SOLUSDT"}
+
+
+def _sign(x: float) -> int:
+    return (x > 0) - (x < 0)
+
+
+def _anchor_metrics(anchor_close: float, pred: list, lo: list, hi: list, act: list) -> dict:
+    """Per-anchor directional / MAPE / band-coverage in pure Python (no numpy),
+    so this read path stays in the base install Render serves. Matches the
+    np-based definitions in app.data.backtest.per_anchor_metrics."""
+    n = len(act)
+    if n == 0:
+        return {"dir": False, "mape": 0.0, "coverage": 0.0}
+    dir_ok = _sign(pred[-1] - anchor_close) == _sign(act[-1] - anchor_close)
+    mape = sum(abs(pred[i] - act[i]) / act[i] for i in range(n)) / n
+    coverage = sum(1 for i in range(n) if lo[i] <= act[i] <= hi[i]) / n
+    return {"dir": bool(dir_ok), "mape": mape, "coverage": coverage}
 
 
 def _supported(interval: str) -> bool:
@@ -66,8 +81,7 @@ def get_replay(symbol: str = Query(...), interval: str = Query("1h")) -> Backtes
     horizon = settings.prediction_horizon_map.get(interval, settings.prediction_horizon)
     out = []
     for a in anchors.values():
-        m = per_anchor_metrics(a["anchor_close"], np.array(a["_pred"]), np.array(a["_lo"]),
-                               np.array(a["_hi"]), np.array(a["_act"]))
+        m = _anchor_metrics(a["anchor_close"], a["_pred"], a["_lo"], a["_hi"], a["_act"])
         anchor_i = idx.get(a["anchor_time_utc"])
         window = []
         if anchor_i is not None:
