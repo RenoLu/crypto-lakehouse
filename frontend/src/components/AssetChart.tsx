@@ -16,10 +16,12 @@ import {
   type LineData,
   type AreaData,
 } from 'lightweight-charts';
-import { getCandles, getForecast, CandleData, ForecastPoint } from '../api/client';
+import { getCandles, getForecast, getBacktestReplay, getBacktestMetrics,
+         CandleData, ForecastPoint, BacktestReplay, BacktestMetrics, BacktestAnchor } from '../api/client';
 import { useRefresh } from '../refresh';
 import { useTheme } from '../theme';
 import CoinIcon from './CoinIcon';
+import BacktestStrip from './BacktestStrip';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
 const INTERVALS = ['1m', '5m', '1h', '1d'];
@@ -111,6 +113,11 @@ function forecastLine(
   return [{ time: anchorTime, value: last.close }, ...pts];
 }
 
+function bandFromAnchor(a: BacktestAnchor, pick: (s: BacktestAnchor['forecast'][0]) => number): AreaData<UTCTimestamp>[] {
+  return a.forecast.map(s => ({ time: toSeconds(s.t), value: pick(s) }))
+    .sort((p, q) => (p.time as number) - (q.time as number));
+}
+
 export default function AssetChart() {
   const { tick } = useRefresh();
   const { theme } = useTheme();
@@ -122,6 +129,11 @@ export default function AssetChart() {
   const [count, setCount] = useState(0);
   const [legend, setLegend] = useState<Legend | null>(null);
   const [hasForecast, setHasForecast] = useState(false);
+  const [view, setView] = useState<'live' | 'replay'>('live');
+  const [replay, setReplay] = useState<BacktestReplay | null>(null);
+  const [metrics, setMetrics] = useState<BacktestMetrics | null>(null);
+  const [anchorIdx, setAnchorIdx] = useState(0);
+  const replaySupported = ['1h', '1d'].includes(interval);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -216,8 +228,46 @@ export default function AssetChart() {
     bandLowRef.current?.applyOptions({ topColor: c.bg, bottomColor: c.bg });
   }, [theme]);
 
+  // Fetch backtest replay data when in replay mode.
+  useEffect(() => {
+    if (view !== 'replay' || !replaySupported) { setReplay(null); setMetrics(null); return; }
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([getBacktestReplay(symbol, interval), getBacktestMetrics(symbol, interval)])
+      .then(([rep, met]) => {
+        if (cancelled) return;
+        setReplay(rep); setMetrics(met);
+        setAnchorIdx(rep.anchors.length ? rep.anchors.length - 1 : 0);
+      })
+      .catch(() => { if (!cancelled) { setReplay(null); setMetrics(null); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [view, symbol, interval, replaySupported, tick]);
+
+  // Render the selected anchor when scrubbing through replay.
+  useEffect(() => {
+    if (view !== 'replay' || !replay || !replay.anchors.length) return;
+    const a = replay.anchors[Math.min(anchorIdx, replay.anchors.length - 1)];
+    candleRef.current?.setData(a.candles.map(c => ({
+      time: toSeconds(c.t), open: c.o, high: c.h, low: c.l, close: c.c,
+    })));
+    volumeRef.current?.setData([]);
+    const central: LineData<UTCTimestamp>[] = a.forecast
+      .map(s => ({ time: toSeconds(s.t), value: s.pred }))
+      .sort((p, q) => (p.time as number) - (q.time as number));
+    forecastRef.current?.setData(central);
+    bandHighRef.current?.setData(bandFromAnchor(a, s => s.hi));
+    bandLowRef.current?.setData(bandFromAnchor(a, s => s.lo));
+    chartRef.current?.timeScale().fitContent();
+    setHasForecast(true);
+    setCount(a.candles.length);
+    lastBarRef.current = null;
+    setLegend(null);
+  }, [view, replay, anchorIdx]);
+
   // Reload candles + forecast on control change or auto-refresh tick.
   useEffect(() => {
+    if (view === 'replay') return;
     setLoading(true);
     let cancelled = false;
 
@@ -271,7 +321,7 @@ export default function AssetChart() {
       .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [symbol, interval, fmode, lookback, tick]);
+  }, [symbol, interval, fmode, lookback, tick, view]);
 
   const selectCls =
     'rounded-sm border border-term-border bg-term-bg px-2.5 py-1 font-mono text-xs text-term-text focus:border-term-accent focus:outline-none';
@@ -306,6 +356,17 @@ export default function AssetChart() {
             <option value={512}>512</option>
           </select>
         </div>
+        <div className="flex items-center gap-2">
+          <span className={labelCls}>Mode</span>
+          <div className="flex overflow-hidden rounded-sm border border-term-border">
+            {(['live', 'replay'] as const).map(v => (
+              <button key={v} onClick={() => setView(v)}
+                className={`px-2.5 py-1 font-mono text-xs ${view === v ? 'bg-term-accent text-term-bg' : 'bg-term-bg text-term-muted hover:text-term-text'}`}>
+                {v === 'live' ? 'Live' : 'Replay'}
+              </button>
+            ))}
+          </div>
+        </div>
         <span className="ml-auto font-mono text-xs text-term-muted">{count} candles</span>
       </div>
 
@@ -338,6 +399,32 @@ export default function AssetChart() {
           </div>
         )}
       </div>
+
+      {view === 'replay' && !replaySupported && (
+        <div className="mt-2 font-mono text-[11px] text-term-muted">Backtest available for 1h / 1d.</div>
+      )}
+      {view === 'replay' && replaySupported && replay && replay.anchors.length > 0 && (() => {
+        const a = replay.anchors[Math.min(anchorIdx, replay.anchors.length - 1)];
+        return (
+          <div className="mt-2">
+            <div className="flex items-center gap-3 font-mono text-[11px]">
+              <button className="px-2 text-term-muted hover:text-term-text"
+                onClick={() => setAnchorIdx(i => Math.max(0, i - 1))}>◀</button>
+              <input type="range" min={0} max={replay.anchors.length - 1} value={anchorIdx}
+                onChange={e => setAnchorIdx(Number(e.target.value))} className="flex-1 accent-term-accent" />
+              <button className="px-2 text-term-muted hover:text-term-text"
+                onClick={() => setAnchorIdx(i => Math.min(replay.anchors.length - 1, i + 1))}>▶</button>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-4 font-mono text-[11px]">
+              <span className="text-term-muted">forecast @ {a.anchor_time_utc.slice(0, 16).replace('T', ' ')}</span>
+              <span className={a.dir ? 'text-term-up' : 'text-term-down'}>dir {a.dir ? '✓' : '✗'}</span>
+              <span className="text-term-muted">MAPE <span className="text-term-text">{(a.mape * 100).toFixed(2)}%</span></span>
+              <span className="text-term-muted">in-band <span className="text-term-text">{(a.coverage * 100).toFixed(0)}%</span></span>
+            </div>
+            <BacktestStrip m={metrics} />
+          </div>
+        );
+      })()}
 
       {hasForecast && (
         <div className="mt-2 flex items-center gap-2 font-mono text-[11px] text-term-accent/80">
