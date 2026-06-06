@@ -42,6 +42,18 @@ def gold_price_predictions_dir() -> Path:
     return settings.gold_path / "asset_price_predictions"
 
 
+def gold_backtest_forecasts_dir() -> Path:
+    return settings.gold_path / "asset_backtest_forecasts"
+
+
+def gold_backtest_metrics_dir() -> Path:
+    return settings.gold_path / "asset_backtest_metrics"
+
+
+def gold_backtest_horizon_dir() -> Path:
+    return settings.gold_path / "asset_backtest_horizon"
+
+
 def gold_asset_reference_path() -> Path:
     return settings.silver_path / "asset_reference" / "asset_reference.parquet"
 

@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     prediction_lookbacks: str = "256,512"  # selectable lookback presets (precomputed per variant)
     prediction_modes: str = "sampled,deterministic"  # selectable forecast modes
 
+    # Backtest (walk-forward accuracy; uses the `predict` extra, run in CI)
+    backtest_intervals: str = "1h,1d"   # scope: skip 1m/5m
+    backtest_anchors: int = 96          # past forecast points per (symbol, interval)
+    backtest_lookback: int = 256        # history window each anchor conditions on
+    backtest_sample_count: int = 8      # fewer than the live 16 to bound CI; band still meaningful
+
     @property
     def symbols(self) -> list[str]:
         return [s.strip() for s in self.default_symbols.split(",")]
@@ -76,6 +82,10 @@ class Settings(BaseSettings):
     @property
     def prediction_mode_list(self) -> list[str]:
         return [m.strip() for m in self.prediction_modes.split(",") if m.strip()]
+
+    @property
+    def backtest_interval_list(self) -> list[str]:
+        return [i.strip() for i in self.backtest_intervals.split(",") if i.strip()]
 
     @property
     def lakehouse_path(self) -> Path:
