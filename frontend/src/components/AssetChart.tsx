@@ -342,20 +342,26 @@ export default function AssetChart() {
             {INTERVALS.map(i => <option key={i} value={i}>{i}</option>)}
           </select>
         </div>
-        <div className="flex items-center gap-2">
-          <span className={labelCls}>Forecast</span>
-          <select value={fmode} onChange={e => setFmode(e.target.value)} className={selectCls}>
-            <option value="sampled">Probabilistic</option>
-            <option value="deterministic">Deterministic</option>
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className={labelCls}>Lookback</span>
-          <select value={lookback} onChange={e => setLookback(Number(e.target.value))} className={selectCls}>
-            <option value={256}>256</option>
-            <option value={512}>512</option>
-          </select>
-        </div>
+        {/* Forecast mode + Lookback select the precomputed LIVE forecast variant;
+            the backtest is fixed (sampled, lookback 256), so hide them in Replay. */}
+        {view === 'live' && (
+          <>
+            <div className="flex items-center gap-2">
+              <span className={labelCls}>Forecast</span>
+              <select value={fmode} onChange={e => setFmode(e.target.value)} className={selectCls}>
+                <option value="sampled">Probabilistic</option>
+                <option value="deterministic">Deterministic</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={labelCls}>Lookback</span>
+              <select value={lookback} onChange={e => setLookback(Number(e.target.value))} className={selectCls}>
+                <option value={256}>256</option>
+                <option value={512}>512</option>
+              </select>
+            </div>
+          </>
+        )}
         <div className="flex items-center gap-2">
           <span className={labelCls}>Mode</span>
           <div className="flex overflow-hidden rounded-sm border border-term-border">
