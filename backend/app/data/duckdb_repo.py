@@ -22,6 +22,9 @@ class DuckDBRepo:
         gold_exposures = str(gold_root / "portfolio_exposures" / "*.parquet")
         gold_quality = str(gold_root / "data_quality_breaks" / "*.parquet")
         gold_predictions = str(gold_root / "asset_price_predictions" / "*.parquet")
+        gold_bt_forecasts = str(gold_root / "asset_backtest_forecasts" / "*.parquet")
+        gold_bt_metrics = str(gold_root / "asset_backtest_metrics" / "*.parquet")
+        gold_bt_horizon = str(gold_root / "asset_backtest_horizon" / "*.parquet")
 
         views = {
             "v_market_candles": f"""
@@ -43,6 +46,18 @@ class DuckDBRepo:
             "v_asset_price_predictions": f"""
                 CREATE OR REPLACE VIEW v_asset_price_predictions AS
                 SELECT * FROM read_parquet('{gold_predictions}', hive_partitioning=true)
+            """,
+            "v_asset_backtest_forecasts": f"""
+                CREATE OR REPLACE VIEW v_asset_backtest_forecasts AS
+                SELECT * FROM read_parquet('{gold_bt_forecasts}', hive_partitioning=true)
+            """,
+            "v_asset_backtest_metrics": f"""
+                CREATE OR REPLACE VIEW v_asset_backtest_metrics AS
+                SELECT * FROM read_parquet('{gold_bt_metrics}', hive_partitioning=true)
+            """,
+            "v_asset_backtest_horizon": f"""
+                CREATE OR REPLACE VIEW v_asset_backtest_horizon AS
+                SELECT * FROM read_parquet('{gold_bt_horizon}', hive_partitioning=true)
             """,
         }
 
