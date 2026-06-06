@@ -5,8 +5,12 @@ Source : https://github.com/shiyu-coder/Kronos  (model/kronos.py, model/module.p
 License: MIT (c) the Kronos authors
 Paper  : "Kronos: A Foundation Model for the Language of Financial Markets", arXiv:2508.02739
 
-Only the model definition is vendored here (no PyPI package exists). The only
-local modification to kronos.py is the import header: the `sys.path` hack and
-`from model.module import *` were replaced with a relative `from .module import *`
-so the code works as a package. Pre-trained weights are downloaded from the
-Hugging Face Hub (NeoQuasar/*) at runtime by app.ml.kronos_loader.
+Only the model definition is vendored here (no PyPI package exists). Local
+modifications to kronos.py:
+  1. Import header: the `sys.path` hack and `from model.module import *` were
+     replaced with a relative `from .module import *` so it works as a package.
+  2. A `sample_logits` flag was threaded through auto_regressive_inference /
+     generate / predict / predict_batch (default True) so callers can request
+     deterministic greedy decoding (sample_logits=False).
+Pre-trained weights are downloaded from the Hugging Face Hub (NeoQuasar/*) at
+runtime by app.ml.kronos_loader.

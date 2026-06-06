@@ -2,31 +2,107 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Palette as RGB channels so Tailwind's term-* tokens get opacity support and
+   both themes swap by toggling the `.light` class on <html>. */
 :root {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  --c-bg: 8 11 18;          /* #080b12 */
+  --c-panel: 13 18 28;      /* #0d121c */
+  --c-panel2: 18 26 40;     /* #121a28 */
+  --c-border: 27 36 51;     /* #1b2433 */
+  --c-grid: 20 28 42;       /* #141c2a */
+  --c-text: 214 221 231;    /* #d6dde7 */
+  --c-muted: 105 116 138;   /* #69748a */
+  --c-up: 38 208 124;       /* #26d07c */
+  --c-down: 246 70 93;      /* #f6465d */
+  --c-accent: 245 165 36;   /* #f5a524 */
+  --grid-line: rgba(255, 255, 255, 0.018);
+  color-scheme: dark;
+
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.light {
+  --c-bg: 244 246 249;      /* #f4f6f9 */
+  --c-panel: 255 255 255;   /* #ffffff */
+  --c-panel2: 238 242 247;
+  --c-border: 222 227 234;  /* #dee3ea */
+  --c-grid: 230 234 240;
+  --c-text: 23 31 43;       /* #171f2b */
+  --c-muted: 110 121 138;
+  --c-up: 12 158 88;        /* darker for contrast on light */
+  --c-down: 211 41 60;
+  --c-accent: 181 117 10;   /* darker amber for contrast on light */
+  --grid-line: rgba(15, 23, 42, 0.04);
+  color-scheme: light;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
+  background-color: rgb(var(--c-bg));
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 32px 32px;
 }
 
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+.font-mono {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
 
-::-webkit-scrollbar-track {
-  background: #1f2937;
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: rgb(var(--c-panel)); }
+::-webkit-scrollbar-thumb { background: rgb(var(--c-border)); border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--c-muted)); }
+
+/* ---- Motion ---------------------------------------------------------------
+   Reveal on load, value flashes on data updates, and the assistant pop-in.
+   The flash classes double as the visual signal for live/streaming updates. */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.94) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes flash-up {
+  0%   { background-color: rgb(var(--c-up) / 0.24); }
+  100% { background-color: rgb(var(--c-up) / 0); }
+}
+@keyframes flash-down {
+  0%   { background-color: rgb(var(--c-down) / 0.24); }
+  100% { background-color: rgb(var(--c-down) / 0); }
+}
+@keyframes ticker-blip {
+  0%   { transform: scale(1); opacity: 1; }
+  35%  { transform: scale(1.6); opacity: 0.55; }
+  100% { transform: scale(1); opacity: 1; }
 }
 
-::-webkit-scrollbar-thumb {
-  background: #4b5563;
-  border-radius: 4px;
-}
+.anim-fade-up { animation: fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.anim-pop     { animation: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.anim-fade    { animation: fade 0.3s ease both; }
+.flash-up     { animation: flash-up 1s ease-out; border-radius: 3px; }
+.flash-down   { animation: flash-down 1s ease-out; border-radius: 3px; }
+.blip         { animation: ticker-blip 1.6s ease-in-out infinite; }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
+/* Coin logos flip on hover of their ticker tile. */
+@keyframes coin-flip {
+  from { transform: perspective(140px) rotateY(0deg); }
+  to   { transform: perspective(140px) rotateY(360deg); }
+}
+.coin-spin { transition: transform 0.2s ease; }
+.coin-tile:hover .coin-spin { animation: coin-flip 0.8s ease-in-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-fade-up, .anim-pop, .anim-fade, .flash-up, .flash-down, .blip, .coin-spin,
+  .coin-tile:hover .coin-spin, .animate-spin, .animate-pulse { animation: none !important; }
 }

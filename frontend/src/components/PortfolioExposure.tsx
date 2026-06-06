@@ -1,74 +1,83 @@
-import { useEffect, useState } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { useEffect, useRef, useState } from 'react';
 import { getPortfolioExposures } from '../api/client';
 import type { PortfolioExposure as PortfolioExposureData } from '../api/client';
+import { useRefresh } from '../refresh';
 
-const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4'];
+const COLORS = ['#f5a524', '#26d07c', '#3b82f6', '#a855f7', '#f6465d', '#06b6d4'];
+
+const label = (s: string) => (s === 'CASH' ? 'Cash' : s.replace('USDT', ''));
 
 export default function PortfolioExposure() {
+  const { tick } = useRefresh();
   const [exposures, setExposures] = useState<PortfolioExposureData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [totalNav, setTotalNav] = useState(0);
+  const prevNav = useRef<number | null>(null);
 
   useEffect(() => {
     getPortfolioExposures()
-      .then(data => {
-        setExposures(data);
-        if (data.length > 0) setTotalNav(data[0].total_nav);
-      })
-      .catch(() => {})
+      .then(setExposures)
+      .catch(() => setExposures([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [tick]);
 
-  const pieData = exposures.map(e => ({
-    name: e.symbol === 'CASH' ? 'Cash' : e.symbol.replace('USDT', ''),
-    value: e.allocation_pct,
-  }));
+  if (loading) return <div className="py-8 text-center font-mono text-sm text-term-muted">Loading…</div>;
+  if (!exposures.length) return <div className="py-8 text-center font-mono text-sm text-term-muted">No portfolio data</div>;
+
+  const nav = exposures[0]?.total_nav ?? 0;
+  const navFlash = prevNav.current != null && nav !== prevNav.current ? (nav > prevNav.current ? 'up' : 'down') : '';
+  prevNav.current = nav;
 
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
-      <h3 className="mb-4 text-lg font-semibold text-white">Portfolio Allocation</h3>
+    <div>
+      <div className="mb-3 flex items-baseline justify-between">
+        <span className="font-mono text-xs uppercase tracking-wider text-term-muted">Total NAV</span>
+        <span
+          key={`nav-${tick}`}
+          className={`px-1 font-mono text-lg font-semibold text-term-text ${
+            navFlash === 'up' ? 'flash-up' : navFlash === 'down' ? 'flash-down' : ''
+          }`}
+        >
+          ${nav.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </span>
+      </div>
 
-      {loading ? (
-        <div className="flex h-[250px] items-center justify-center text-gray-500">Loading...</div>
-      ) : pieData.length === 0 ? (
-        <div className="flex h-[250px] items-center justify-center text-gray-500">No portfolio data</div>
-      ) : (
-        <>
-          <div className="mb-2 text-sm text-gray-400">
-            Total NAV: <span className="font-semibold text-white">${totalNav.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-          </div>
-          <ResponsiveContainer width="100%" height={250}>
-            <PieChart>
-              <Pie
-                data={pieData}
-                cx="50%"
-                cy="50%"
-                outerRadius={80}
-                fill="#8884d8"
-                dataKey="value"
-                label={({ name, value }) => `${name} ${value.toFixed(1)}%`}
-              >
-                {pieData.map((_, i) => (
-                  <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip
-                contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
-              />
-            </PieChart>
-          </ResponsiveContainer>
+      <div className="mb-4 flex h-2 overflow-hidden rounded-sm bg-term-bg">
+        {exposures.map((e, i) => (
+          <div
+            key={e.symbol}
+            className="transition-[width] duration-700 ease-out"
+            style={{ width: `${e.allocation_pct}%`, backgroundColor: COLORS[i % COLORS.length] }}
+          />
+        ))}
+      </div>
 
-          <div className="mt-2 space-y-1">
-            {exposures.map(e => (
-              <div key={e.symbol} className="flex items-center justify-between text-sm">
-                <span className="text-gray-300">{e.symbol === 'CASH' ? 'Cash' : e.symbol.replace('USDT', '')}</span>
-                <span className="text-white font-medium">{e.allocation_pct.toFixed(1)}%</span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+      <table className="w-full font-mono text-sm">
+        <thead>
+          <tr className="text-left text-[11px] uppercase tracking-wider text-term-muted">
+            <th className="pb-2 font-medium">Asset</th>
+            <th className="pb-2 text-right font-medium">Alloc</th>
+            <th className="pb-2 text-right font-medium">Value</th>
+            <th className="pb-2 text-right font-medium">24h P&L</th>
+          </tr>
+        </thead>
+        <tbody>
+          {exposures.map((e, i) => (
+            <tr key={e.symbol} className="border-t border-term-border/60">
+              <td className="py-1.5 text-term-text">
+                <span className="mr-2 inline-block h-2 w-2 rounded-sm align-middle" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                {label(e.symbol)}
+              </td>
+              <td className="py-1.5 text-right text-term-text">{e.allocation_pct.toFixed(1)}%</td>
+              <td className="py-1.5 text-right text-term-text">
+                ${e.market_value.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+              </td>
+              <td className={`py-1.5 text-right ${e.daily_pnl >= 0 ? 'text-term-up' : 'text-term-down'}`}>
+                {e.daily_pnl >= 0 ? '+' : ''}{e.daily_pnl.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

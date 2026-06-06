@@ -384,7 +384,7 @@ def sample_from_logits(logits, temperature=1.0, top_k=None, top_p=None, sample_l
     return x
 
 
-def auto_regressive_inference(tokenizer, model, x, x_stamp, y_stamp, max_context, pred_len, clip=5, T=1.0, top_k=0, top_p=0.99, sample_count=5, verbose=False):
+def auto_regressive_inference(tokenizer, model, x, x_stamp, y_stamp, max_context, pred_len, clip=5, T=1.0, top_k=0, top_p=0.99, sample_count=5, verbose=False, sample_logits=True):
     with torch.no_grad():
         x = torch.clip(x, -clip, clip)
 
@@ -433,11 +433,11 @@ def auto_regressive_inference(tokenizer, model, x, x_stamp, y_stamp, max_context
 
             s1_logits, context = model.decode_s1(input_tokens[0], input_tokens[1], current_stamp)
             s1_logits = s1_logits[:, -1, :]
-            sample_pre = sample_from_logits(s1_logits, temperature=T, top_k=top_k, top_p=top_p, sample_logits=True)
+            sample_pre = sample_from_logits(s1_logits, temperature=T, top_k=top_k, top_p=top_p, sample_logits=sample_logits)
 
             s2_logits = model.decode_s2(context, sample_pre)
             s2_logits = s2_logits[:, -1, :]
-            sample_post = sample_from_logits(s2_logits, temperature=T, top_k=top_k, top_p=top_p, sample_logits=True)
+            sample_post = sample_from_logits(s2_logits, temperature=T, top_k=top_k, top_p=top_p, sample_logits=sample_logits)
 
             generated_pre[:, i] = sample_pre.squeeze(-1)
             generated_post[:, i] = sample_post.squeeze(-1)
@@ -503,18 +503,18 @@ class KronosPredictor:
         self.tokenizer = self.tokenizer.to(self.device)
         self.model = self.model.to(self.device)
 
-    def generate(self, x, x_stamp, y_stamp, pred_len, T, top_k, top_p, sample_count, verbose):
+    def generate(self, x, x_stamp, y_stamp, pred_len, T, top_k, top_p, sample_count, verbose, sample_logits=True):
 
         x_tensor = torch.from_numpy(np.array(x).astype(np.float32)).to(self.device)
         x_stamp_tensor = torch.from_numpy(np.array(x_stamp).astype(np.float32)).to(self.device)
         y_stamp_tensor = torch.from_numpy(np.array(y_stamp).astype(np.float32)).to(self.device)
 
         preds = auto_regressive_inference(self.tokenizer, self.model, x_tensor, x_stamp_tensor, y_stamp_tensor, self.max_context, pred_len,
-                                          self.clip, T, top_k, top_p, sample_count, verbose)
+                                          self.clip, T, top_k, top_p, sample_count, verbose, sample_logits)
         preds = preds[:, -pred_len:, :]
         return preds
 
-    def predict(self, df, x_timestamp, y_timestamp, pred_len, T=1.0, top_k=0, top_p=0.9, sample_count=1, verbose=True):
+    def predict(self, df, x_timestamp, y_timestamp, pred_len, T=1.0, top_k=0, top_p=0.9, sample_count=1, verbose=True, sample_logits=True):
 
         if not isinstance(df, pd.DataFrame):
             raise ValueError("Input must be a pandas DataFrame.")
@@ -548,7 +548,7 @@ class KronosPredictor:
         x_stamp = x_stamp[np.newaxis, :]
         y_stamp = y_stamp[np.newaxis, :]
 
-        preds = self.generate(x, x_stamp, y_stamp, pred_len, T, top_k, top_p, sample_count, verbose)
+        preds = self.generate(x, x_stamp, y_stamp, pred_len, T, top_k, top_p, sample_count, verbose, sample_logits)
 
         preds = preds.squeeze(0)
         preds = preds * (x_std + 1e-5) + x_mean
@@ -557,7 +557,7 @@ class KronosPredictor:
         return pred_df
 
 
-    def predict_batch(self, df_list, x_timestamp_list, y_timestamp_list, pred_len, T=1.0, top_k=0, top_p=0.9, sample_count=1, verbose=True):
+    def predict_batch(self, df_list, x_timestamp_list, y_timestamp_list, pred_len, T=1.0, top_k=0, top_p=0.9, sample_count=1, verbose=True, sample_logits=True):
         """
         Perform parallel (batch) prediction on multiple time series. All series must have the same historical length and prediction length (pred_len).
 
@@ -647,7 +647,7 @@ class KronosPredictor:
         x_stamp_batch = np.stack(x_stamp_list, axis=0).astype(np.float32) # (B, seq_len, time_feat)
         y_stamp_batch = np.stack(y_stamp_list, axis=0).astype(np.float32) # (B, pred_len, time_feat)
 
-        preds = self.generate(x_batch, x_stamp_batch, y_stamp_batch, pred_len, T, top_k, top_p, sample_count, verbose)
+        preds = self.generate(x_batch, x_stamp_batch, y_stamp_batch, pred_len, T, top_k, top_p, sample_count, verbose, sample_logits)
         # preds: (B, pred_len, feat)
 
         pred_dfs = []

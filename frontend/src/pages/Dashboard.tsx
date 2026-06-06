@@ -1,26 +1,18 @@
-import MarketOverview from '../components/MarketOverview';
 import AssetChart from '../components/AssetChart';
-import PortfolioExposure from '../components/PortfolioExposure';
-import QualityBreaks from '../components/QualityBreaks';
-import AssistantPanel from '../components/AssistantPanel';
+import TickerBar from '../components/TickerBar';
+import TabbedPanel from '../components/TabbedPanel';
 
 export default function Dashboard() {
   return (
-    <div className="space-y-6">
-      <MarketOverview />
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <AssetChart />
-        </div>
-        <div>
-          <PortfolioExposure />
-        </div>
+    <div className="space-y-3">
+      <div className="anim-fade-up" style={{ animationDelay: '0ms' }}>
+        <TickerBar />
       </div>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <QualityBreaks />
-        <AssistantPanel />
+      <div className="anim-fade-up" style={{ animationDelay: '90ms' }}>
+        <AssetChart />
+      </div>
+      <div className="anim-fade-up" style={{ animationDelay: '180ms' }}>
+        <TabbedPanel />
       </div>
     </div>
   );

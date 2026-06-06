@@ -3,6 +3,9 @@
 Mirrors the gold_metrics pattern: a compute_* function that reads silver and a
 write_gold_* function. Inference is run as a batch job (pipeline / script), never
 in the request path. Requires the optional `predict` install extra (torch etc.).
+
+Forecasts are precomputed for each (symbol, interval, mode, lookback) variant so
+the read API/UI can select among them without re-running the model.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -29,6 +32,8 @@ INTERVAL_DELTA = {
 PREDICTION_SCHEMA = {
     "symbol": pl.Utf8,
     "interval": pl.Utf8,
+    "mode": pl.Utf8,
+    "lookback": pl.Int64,
     "generated_at_utc": pl.Utf8,
     "forecast_time_utc": pl.Utf8,
     "step": pl.Int64,
@@ -46,8 +51,8 @@ MIN_HISTORY = 2  # need at least a couple of bars to normalize/forecast
 
 def _build_interval_inputs(full: pl.DataFrame, interval: str, lookback: int, horizon: int):
     """Build batchable inputs (metas, x_dfs, x_timestamps, y_timestamps) for a
-    single interval — every symbol shares the same horizon, so they can be
-    forecast together in one predict_batch call."""
+    single interval + lookback — every symbol shares the same horizon, so they can
+    be forecast together in one predict_batch call."""
     delta = INTERVAL_DELTA.get(interval)
     if delta is None:
         logger.warning(f"Unsupported prediction interval {interval}; skipping")
@@ -78,11 +83,23 @@ def _build_interval_inputs(full: pl.DataFrame, interval: str, lookback: int, hor
     return metas, x_dfs, x_tss, y_tss
 
 
+def _emit(rows, symbol, interval, mode, lookback, generated_at, y_ts, horizon, o, h, l, c, v, blo, bhi):
+    for step in range(horizon):
+        rows.append({
+            "symbol": symbol, "interval": interval, "mode": mode, "lookback": lookback,
+            "generated_at_utc": generated_at,
+            "forecast_time_utc": y_ts.iloc[step].isoformat(),
+            "step": step + 1,
+            "pred_open": float(o[step]), "pred_high": float(h[step]), "pred_low": float(l[step]),
+            "pred_close": float(c[step]), "pred_volume": float(v[step]),
+            "pred_close_low": float(blo[step]), "pred_close_high": float(bhi[step]),
+        })
+
+
 def compute_price_predictions(silver_root: Path) -> pl.DataFrame:
-    """Forecast each configured symbol/interval with Kronos and return a tidy
-    DataFrame. Uses low-temperature Monte-Carlo sampling and robust statistics:
-    the median for the central path and quantiles for the uncertainty band, so
-    the band stays calibrated instead of ballooning on outlier trajectories."""
+    """Forecast each (symbol, interval, mode, lookback) variant. `sampled` uses
+    low-temperature Monte-Carlo with a median central path + percentile band;
+    `deterministic` uses a single greedy (argmax) path with no band."""
     all_files = list((silver_root / "market_candles").rglob("*.parquet"))
     if not all_files:
         logger.warning("No silver parquet files found for predictions")
@@ -92,7 +109,6 @@ def compute_price_predictions(silver_root: Path) -> pl.DataFrame:
     if full.is_empty():
         return pl.DataFrame(schema=PREDICTION_SCHEMA)
 
-    lookback = settings.prediction_lookback
     n_samples = max(1, settings.prediction_sample_count)
     temperature = settings.prediction_temperature
     top_p = settings.prediction_top_p
@@ -100,71 +116,57 @@ def compute_price_predictions(silver_root: Path) -> pl.DataFrame:
     q_hi = settings.prediction_band_high
     horizon_map = settings.prediction_horizon_map
     default_horizon = settings.prediction_horizon
+    lookbacks = settings.prediction_lookback_list or [settings.prediction_lookback]
+    modes = settings.prediction_mode_list or ["sampled"]
 
     predictor = get_predictor()
     generated_at = datetime.now(UTC).isoformat()
     rows: list[dict] = []
 
-    # Forecast one interval at a time: same horizon per interval keeps the batch
-    # valid and lets each interval use its own (bounded) horizon.
     for interval in settings.prediction_interval_list:
         horizon = horizon_map.get(interval, default_horizon)
-        metas, x_dfs, x_tss, y_tss = _build_interval_inputs(full, interval, lookback, horizon)
-        if not metas:
-            continue
+        for lookback in lookbacks:
+            metas, x_dfs, x_tss, y_tss = _build_interval_inputs(full, interval, lookback, horizon)
+            if not metas:
+                continue
+            # predict_batch needs equal historical length across the batch.
+            common = min(len(x) for x in x_dfs)
+            x_dfs = [x.iloc[-common:].reset_index(drop=True) for x in x_dfs]
+            x_tss = [t.iloc[-common:].reset_index(drop=True) for t in x_tss]
 
-        # predict_batch needs equal historical length across the batch.
-        common = min(len(x) for x in x_dfs)
-        x_dfs = [x.iloc[-common:].reset_index(drop=True) for x in x_dfs]
-        x_tss = [t.iloc[-common:].reset_index(drop=True) for t in x_tss]
+            for mode in modes:
+                if mode == "deterministic":
+                    preds = predictor.predict_batch(
+                        df_list=x_dfs, x_timestamp_list=x_tss, y_timestamp_list=y_tss,
+                        pred_len=horizon, T=temperature, top_k=0, top_p=top_p,
+                        sample_count=1, verbose=False, sample_logits=False,
+                    )
+                    for i, (symbol, _) in enumerate(metas):
+                        d = preds[i]
+                        c = d["close"].to_numpy()
+                        _emit(rows, symbol, interval, mode, lookback, generated_at, y_tss[i], horizon,
+                              d["open"].to_numpy(), d["high"].to_numpy(), d["low"].to_numpy(), c,
+                              d["volume"].to_numpy(), c, c)  # deterministic -> band == central
+                else:  # sampled
+                    passes = [
+                        predictor.predict_batch(
+                            df_list=x_dfs, x_timestamp_list=x_tss, y_timestamp_list=y_tss,
+                            pred_len=horizon, T=temperature, top_k=0, top_p=top_p,
+                            sample_count=1, verbose=False, sample_logits=True,
+                        )
+                        for _ in range(n_samples)
+                    ]
+                    for i, (symbol, _) in enumerate(metas):
+                        def stack(col: str, idx=i) -> np.ndarray:
+                            return np.stack([passes[p][idx][col].to_numpy() for p in range(n_samples)])
 
-        # Monte-Carlo: independent low-temperature single-sample trajectories.
-        passes = []
-        for _ in range(n_samples):
-            passes.append(
-                predictor.predict_batch(
-                    df_list=x_dfs,
-                    x_timestamp_list=x_tss,
-                    y_timestamp_list=y_tss,
-                    pred_len=horizon,
-                    T=temperature,
-                    top_k=0,
-                    top_p=top_p,
-                    sample_count=1,
-                    verbose=False,
-                )
-            )
-        logger.info(f"{interval}: {n_samples} samples x {len(metas)} series (horizon {horizon})")
-
-        for i, (symbol, _) in enumerate(metas):
-            def stack(col: str) -> np.ndarray:
-                return np.stack([passes[p][i][col].to_numpy() for p in range(n_samples)])
-
-            med_open = np.median(stack("open"), axis=0)
-            med_high = np.median(stack("high"), axis=0)
-            med_low = np.median(stack("low"), axis=0)
-            med_vol = np.median(stack("volume"), axis=0)
-            closes = stack("close")
-            med_close = np.median(closes, axis=0)
-            band_low = np.quantile(closes, q_lo, axis=0)
-            band_high = np.quantile(closes, q_hi, axis=0)
-            y_ts = y_tss[i]
-
-            for step in range(horizon):
-                rows.append({
-                    "symbol": symbol,
-                    "interval": interval,
-                    "generated_at_utc": generated_at,
-                    "forecast_time_utc": y_ts.iloc[step].isoformat(),
-                    "step": step + 1,
-                    "pred_open": float(med_open[step]),
-                    "pred_high": float(med_high[step]),
-                    "pred_low": float(med_low[step]),
-                    "pred_close": float(med_close[step]),
-                    "pred_volume": float(med_vol[step]),
-                    "pred_close_low": float(band_low[step]),
-                    "pred_close_high": float(band_high[step]),
-                })
+                        closes = stack("close")
+                        _emit(rows, symbol, interval, mode, lookback, generated_at, y_tss[i], horizon,
+                              np.median(stack("open"), axis=0), np.median(stack("high"), axis=0),
+                              np.median(stack("low"), axis=0), np.median(closes, axis=0),
+                              np.median(stack("volume"), axis=0),
+                              np.quantile(closes, q_lo, axis=0), np.quantile(closes, q_hi, axis=0))
+            logger.info(f"{interval} lookback={lookback}: {modes} ({len(metas)} series, horizon {horizon})")
 
     logger.info(f"Computed {len(rows)} prediction rows")
     return pl.DataFrame(rows, schema=PREDICTION_SCHEMA)

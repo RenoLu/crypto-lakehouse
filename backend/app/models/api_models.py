@@ -54,6 +54,8 @@ class QualityBreak(BaseModel):
 class PredictionResponse(BaseModel):
     symbol: str
     interval: str
+    mode: str
+    lookback: int
     count: int
     generated_at_utc: str | None
     data: list[dict]

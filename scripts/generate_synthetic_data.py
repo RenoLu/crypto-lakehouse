@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
-"""Generate realistic synthetic market data for demo when Binance is unavailable."""
+"""Generate realistic synthetic market data for demo when Binance is unavailable.
 
-import json
-import random
-import uuid
+All intervals for a symbol are derived from a SINGLE underlying 1-minute price
+path, then aggregated (OHLC resampling) into 1m/5m/1h/1d bars. This guarantees
+the latest price is consistent across every interval — a 1d bar is a true
+aggregate of the same minutes that make up the 1h/5m/1m bars, exactly like real
+market data.
+
+(Previously each interval was an independent random walk from the same base, so
+the "current price" diverged wildly by interval — e.g. 1d ended at ~82k while 1h
+sat at ~104k for BTC.)
+"""
+
 import sys
+import random
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -13,7 +22,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 from rich.console import Console
 
 from app.data.bronze_writer import write_bronze_klines
-from app.core.logging import logger
 
 console = Console()
 
@@ -24,41 +32,51 @@ SYMBOL_PRICES = {
 }
 
 INTERVAL_MINUTES = {"1m": 1, "5m": 5, "1h": 60, "1d": 1440}
+BAR_COUNT = 1000          # bars emitted per interval
+REVERSION = 0.000004      # per-minute mean reversion toward base; tiny so the
+                          # year-long path can still wander a realistic amount
 
 
-def generate_klines(symbol: str, interval: str, count: int = 1000) -> list[dict]:
+def generate_master_path(symbol: str, length: int) -> list[float]:
+    """One minute-resolution price path. Coarser bars aggregate slices of this."""
     config = SYMBOL_PRICES[symbol]
-    minutes = INTERVAL_MINUTES[interval]
     base = config["base"]
-    price = base
-    # Treat the configured volatility as a *daily* figure and scale per bar by
-    # sqrt-of-time, so a 1m bar moves far less than a 1d bar (realistic), instead
-    # of a flat 2% on every interval.
-    vol = config["volatility"] * (minutes / 1440.0) ** 0.5
-    reversion = 0.01  # mild mean reversion toward base keeps the 1000-step walk bounded
+    vol_min = config["volatility"] * (1 / 1440) ** 0.5  # daily vol scaled to 1 min
+    price = float(base)
+    path: list[float] = []
+    for _ in range(length):
+        drift = REVERSION * (base - price) / price
+        price *= 1 + drift + random.gauss(0, vol_min)
+        path.append(price)
+    return path
 
-    now = datetime.now(timezone.utc)
-    start = now - timedelta(minutes=minutes * count)
+
+def aggregate_klines(symbol: str, interval: str, master: list[float], now: datetime) -> list[dict]:
+    """Resample the tail of the master minute-path into BAR_COUNT OHLC bars."""
+    minutes = INTERVAL_MINUTES[interval]
+    vol_min = SYMBOL_PRICES[symbol]["volatility"] * (1 / 1440) ** 0.5
+    span = BAR_COUNT * minutes
+    tail = master[-span:]                      # most recent `span` minutes
+    start = now - timedelta(minutes=span)
 
     klines = []
-    for i in range(count):
-        ts = start + timedelta(minutes=minutes * i)
+    for b in range(BAR_COUNT):
+        chunk = tail[b * minutes:(b + 1) * minutes]
+        ts = start + timedelta(minutes=b * minutes)
         open_time = int(ts.timestamp() * 1000)
         close_time = int((ts + timedelta(minutes=minutes)).timestamp() * 1000)
 
-        drift = reversion * (base - price) / price  # pull back toward base
-        change = drift + random.gauss(0, vol)
-        o = price
-        c = price * (1 + change)
-        h = max(o, c) * (1 + abs(random.gauss(0, vol * 0.5)))
-        l = min(o, c) * (1 - abs(random.gauss(0, vol * 0.5)))
-        volume = random.uniform(100, 10000) * (100000 / price)
+        o = chunk[0]
+        c = chunk[-1]
+        hi = max(chunk) * (1 + abs(random.gauss(0, vol_min * 0.3)))
+        lo = min(chunk) * (1 - abs(random.gauss(0, vol_min * 0.3)))
+        volume = random.uniform(100, 10000) * (100000 / c) * (minutes ** 0.5)
 
         klines.append({
             "open_time": open_time,
             "open": f"{o:.2f}",
-            "high": f"{h:.2f}",
-            "low": f"{l:.2f}",
+            "high": f"{hi:.2f}",
+            "low": f"{lo:.2f}",
             "close": f"{c:.2f}",
             "volume": f"{volume:.2f}",
             "close_time": close_time,
@@ -67,27 +85,30 @@ def generate_klines(symbol: str, interval: str, count: int = 1000) -> list[dict]
             "taker_buy_base_volume": f"{volume * 0.55:.2f}",
             "taker_buy_quote_volume": f"{volume * c * 0.55:.2f}",
         })
-
-        price = c
-
     return klines
 
 
 def main() -> None:
     console.print("[bold yellow]=== Generating Synthetic Market Data ===[/bold yellow]")
-    console.print("[dim]Binance API is geo-restricted. Using realistic synthetic data.[/dim]\n")
+    console.print("[dim]One underlying path per symbol -> consistent across intervals.[/dim]\n")
 
     symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
     intervals = ["1m", "5m", "1h", "1d"]
+    master_length = BAR_COUNT * max(INTERVAL_MINUTES.values())
+    now = datetime.now(timezone.utc)
     total = 0
 
     for symbol in symbols:
+        master = generate_master_path(symbol, master_length)
         for interval in intervals:
-            klines = generate_klines(symbol, interval, count=1000)
-            request_params = {"symbol": symbol, "interval": interval, "limit": 1000, "source": "synthetic"}
+            klines = aggregate_klines(symbol, interval, master, now)
+            request_params = {"symbol": symbol, "interval": interval, "limit": BAR_COUNT, "source": "synthetic"}
             write_bronze_klines(symbol, interval, klines, request_params)
             total += len(klines)
-            console.print(f"  [green]OK[/green] {symbol}/{interval}: {len(klines)} candles")
+            console.print(
+                f"  [green]OK[/green] {symbol}/{interval}: {len(klines)} candles "
+                f"(last close ~{float(klines[-1]['close']):,.2f})"
+            )
 
     console.print(f"\n[bold green]Generated {total} synthetic records[/bold green]")
 

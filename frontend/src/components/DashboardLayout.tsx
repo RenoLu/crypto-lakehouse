@@ -1,77 +1,66 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { RefreshCw } from 'lucide-react';
-import { getPollingStatus, triggerPipeline } from '../api/client';
+import { useState, type ReactNode } from 'react';
+import { RefreshCw, Sun, Moon } from 'lucide-react';
+import { useRefresh, useNow } from '../refresh';
+import { useTheme } from '../theme';
+import AssistantBubble from './AssistantBubble';
 
-interface DashboardLayoutProps {
-  children: ReactNode;
-}
+export default function DashboardLayout({ children }: { children: ReactNode }) {
+  const { lastUpdated, refresh, live } = useRefresh();
+  const { theme, toggle } = useTheme();
+  const now = useNow();
+  const ago = Math.max(0, Math.round((now - lastUpdated) / 1000));
+  const [spin, setSpin] = useState(false);
 
-export default function DashboardLayout({ children }: DashboardLayoutProps) {
-  const [pollingEnabled, setPollingEnabled] = useState(false);
-  const [pollingInterval, setPollingInterval] = useState(0);
-  const [triggering, setTriggering] = useState(false);
-  const [lastRun, setLastRun] = useState<string | null>(null);
-
-  useEffect(() => {
-    getPollingStatus()
-      .then(s => {
-        setPollingEnabled(s.enabled);
-        setPollingInterval(s.interval_seconds);
-      })
-      .catch(() => {});
-  }, []);
-
-  async function handleTrigger() {
-    setTriggering(true);
-    try {
-      const result = await triggerPipeline();
-      setLastRun(result.timestamp);
-    } catch {
-      // ignore
-    } finally {
-      setTriggering(false);
-    }
-  }
+  const onRefresh = () => {
+    setSpin(true);
+    refresh();
+    window.setTimeout(() => setSpin(false), 700);
+  };
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
-      <header className="border-b border-gray-800 bg-gray-900/50 backdrop-blur">
-        <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">📊</span>
-              <div>
-                <h1 className="text-xl font-bold text-white">Crypto Lakehouse</h1>
-                <p className="text-xs text-gray-400">AI-Native Trading Data Platform</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-4 text-sm">
-              {pollingEnabled && (
-                <span className="flex items-center gap-1.5 text-green-400">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-green-400" />
-                  Polling every {pollingInterval}s
-                </span>
-              )}
-              <button
-                onClick={handleTrigger}
-                disabled={triggering}
-                className="flex items-center gap-1.5 rounded border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs text-gray-300 hover:border-blue-500 hover:text-blue-400 disabled:opacity-50"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${triggering ? 'animate-spin' : ''}`} />
-                {triggering ? 'Running...' : 'Run Pipeline'}
-              </button>
-              {lastRun && (
-                <span className="hidden sm:inline text-xs text-gray-500">
-                  Last: {new Date(lastRun).toLocaleTimeString()}
-                </span>
-              )}
-            </div>
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-30 border-b border-term-border bg-term-bg/85 backdrop-blur">
+        <div className="mx-auto flex max-w-[1500px] items-center justify-between px-4 py-2.5 sm:px-6">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-6 w-6 place-items-center rounded-sm bg-term-accent/15 text-xs text-term-accent ring-1 ring-term-accent/30">
+              ◆
+            </span>
+            <span className="font-mono text-sm font-semibold tracking-tight text-term-text">CRYPTO·LAKEHOUSE</span>
+            <span className="hidden rounded-sm border border-term-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-term-muted sm:inline-block">
+              terminal
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3 sm:gap-4">
+            <span
+              title={live ? 'Streaming in real time' : 'Auto-refresh (polling)'}
+              className={`flex items-center gap-1.5 font-mono text-xs ${live ? 'text-term-up' : 'text-term-accent'}`}
+            >
+              <span className={`h-1.5 w-1.5 animate-pulse rounded-full ${live ? 'bg-term-up' : 'bg-term-accent'}`} />
+              {live ? 'LIVE' : 'LIVE·POLL'}
+            </span>
+            <span className="hidden font-mono text-xs text-term-muted sm:inline">updated {ago}s ago</span>
+            <button
+              onClick={onRefresh}
+              className="flex items-center gap-1.5 rounded-sm border border-term-border bg-term-panel px-2.5 py-1 font-mono text-xs text-term-muted transition-colors hover:border-term-accent/60 hover:text-term-accent"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${spin ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">refresh</span>
+            </button>
+            <button
+              onClick={toggle}
+              aria-label="Toggle theme"
+              className="grid h-7 w-7 place-items-center rounded-sm border border-term-border bg-term-panel text-term-muted transition-colors hover:border-term-accent/60 hover:text-term-accent"
+            >
+              {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+            </button>
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        {children}
-      </main>
+
+      <main className="mx-auto max-w-[1500px] px-4 py-4 sm:px-6">{children}</main>
+
+      <AssistantBubble />
     </div>
   );
 }

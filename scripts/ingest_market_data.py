@@ -47,6 +47,20 @@ def main() -> None:
                     console.print(f"  [red]FAIL[/red] {symbol}/{interval}: {e}")
                     logger.error(f"Failed to ingest {symbol}/{interval}: {e}")
 
+    if total_records == 0:
+        # Total outage (exchange unreachable / IP geo-blocked). Fall back to the
+        # synthetic generator so the snapshot stays internally consistent
+        # (all-or-nothing: never mix real + synthetic across intervals).
+        console.print(
+            "[bold red]No live data ingested[/bold red] "
+            f"(base_url={settings.binance_base_url}). Falling back to synthetic data."
+        )
+        logger.warning("Live ingestion returned 0 records; using synthetic fallback")
+        import generate_synthetic_data
+
+        generate_synthetic_data.main()
+        return
+
     console.print(f"\n[bold green]Ingestion complete: {total_records} total records[/bold green]")
 
 

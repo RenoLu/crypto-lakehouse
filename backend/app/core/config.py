@@ -7,7 +7,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
 class Settings(BaseSettings):
-    binance_base_url: str = "https://data-api.binance.vision"
+    # Binance.US: US-accessible public market data, keyless, 1000 bars/call,
+    # identical kline schema to global Binance. Override via BINANCE_BASE_URL
+    # (e.g. https://data-api.binance.vision for deeper global history when not geo-blocked).
+    binance_base_url: str = "https://api.binance.us"
     duckdb_path: str = str(PROJECT_ROOT / "data" / "duckdb" / "lakehouse.duckdb")
     lakehouse_root: str = str(PROJECT_ROOT / "data" / "lakehouse")
     ollama_base_url: str = "http://localhost:11434"
@@ -34,6 +37,8 @@ class Settings(BaseSettings):
     prediction_top_p: float = 0.9
     prediction_band_low: float = 0.1  # lower quantile for the uncertainty band
     prediction_band_high: float = 0.9  # upper quantile for the uncertainty band
+    prediction_lookbacks: str = "256,512"  # selectable lookback presets (precomputed per variant)
+    prediction_modes: str = "sampled,deterministic"  # selectable forecast modes
 
     @property
     def symbols(self) -> list[str]:
@@ -57,6 +62,20 @@ class Settings(BaseSettings):
             except ValueError:
                 continue
         return out
+
+    @property
+    def prediction_lookback_list(self) -> list[int]:
+        out: list[int] = []
+        for part in self.prediction_lookbacks.split(","):
+            try:
+                out.append(int(part.strip()))
+            except ValueError:
+                continue
+        return out
+
+    @property
+    def prediction_mode_list(self) -> list[str]:
+        return [m.strip() for m in self.prediction_modes.split(",") if m.strip()]
 
     @property
     def lakehouse_path(self) -> Path:

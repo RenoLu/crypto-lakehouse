@@ -1,9 +1,11 @@
 name: Refresh lakehouse + forecast snapshot
 
-# Generates a consistent synthetic data snapshot (silver + gold incl. Kronos
-# predictions) on a free runner and commits it to main, so Render can serve the
-# forecast read-only (it can't run torch on the free tier). Not triggered by
-# push, so committing the snapshot back does not loop.
+# Builds a data snapshot (silver + gold incl. Kronos predictions) on a free
+# runner and commits it to main, so Render can serve it read-only (it can't run
+# torch on the free tier). Ingests real OHLCV from Binance.US; if that's
+# unreachable on the runner (IP geo-block) it auto-falls back to synthetic data,
+# so the snapshot is always produced. Not triggered by push, so committing the
+# snapshot back does not loop.
 
 on:
   schedule:
@@ -44,7 +46,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python scripts/seed_demo_data.py
-          python scripts/generate_synthetic_data.py
+          python scripts/ingest_market_data.py
           python scripts/build_silver.py
           python scripts/build_gold.py
           python scripts/run_quality_checks.py

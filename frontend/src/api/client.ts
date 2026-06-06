@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export interface CandleData {
   open_time_utc: string;
@@ -74,6 +74,8 @@ export interface ForecastPoint {
 export interface ForecastResponse {
   symbol: string;
   interval: string;
+  mode: string;
+  lookback: number;
   count: number;
   generated_at_utc: string | null;
   data: ForecastPoint[];
@@ -111,9 +113,14 @@ export async function getDailyMetrics(symbol: string, limit: number = 90) {
   );
 }
 
-export async function getForecast(symbol: string, interval: string = '1h') {
+export async function getForecast(
+  symbol: string,
+  interval: string = '1h',
+  mode: string = 'sampled',
+  lookback: number = 256,
+) {
   return fetchApi<ForecastResponse>(
-    `/predictions/forecast?symbol=${symbol}&interval=${interval}`
+    `/predictions/forecast?symbol=${symbol}&interval=${interval}&mode=${mode}&lookback=${lookback}`
   );
 }
 
