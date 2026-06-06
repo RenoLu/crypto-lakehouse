@@ -71,3 +71,22 @@ class AssistantResponse(BaseModel):
     query_used: str
     rows: list[dict]
     warnings: list[str]
+
+
+class BacktestReplayResponse(BaseModel):
+    symbol: str
+    interval: str
+    supported: bool
+    anchors: list[dict]
+
+
+class BacktestMetricsResponse(BaseModel):
+    symbol: str
+    interval: str
+    supported: bool
+    n_anchors: int
+    directional_pct: float
+    mape: float
+    band_coverage: float
+    band_nominal: float
+    horizon: list[dict]
