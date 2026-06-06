@@ -3,15 +3,18 @@ import {
   createChart,
   CandlestickSeries,
   HistogramSeries,
+  LineSeries,
   ColorType,
   CrosshairMode,
+  LineStyle,
   type IChartApi,
   type ISeriesApi,
   type UTCTimestamp,
   type CandlestickData,
   type HistogramData,
+  type LineData,
 } from 'lightweight-charts';
-import { getCandles, CandleData } from '../api/client';
+import { getCandles, getForecast, CandleData, ForecastPoint } from '../api/client';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
 const INTERVALS = ['1m', '5m', '1h', '1d'];
@@ -20,6 +23,8 @@ const UP = '#10b981';
 const DOWN = '#ef4444';
 const UP_VOL = 'rgba(16, 185, 129, 0.5)';
 const DOWN_VOL = 'rgba(239, 68, 68, 0.5)';
+const FORECAST = '#f59e0b';
+const BAND = 'rgba(245, 158, 11, 0.35)';
 
 interface Legend {
   time: string;
@@ -45,19 +50,15 @@ function changePct(l: Legend): string {
   return `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
 }
 
+const toSeconds = (iso: string) => Math.floor(Date.parse(iso) / 1000) as UTCTimestamp;
+
 function toCandle(d: CandleData): CandlestickData<UTCTimestamp> {
-  return {
-    time: Math.floor(Date.parse(d.open_time_utc) / 1000) as UTCTimestamp,
-    open: d.open,
-    high: d.high,
-    low: d.low,
-    close: d.close,
-  };
+  return { time: toSeconds(d.open_time_utc), open: d.open, high: d.high, low: d.low, close: d.close };
 }
 
 function toVolume(d: CandleData): HistogramData<UTCTimestamp> {
   return {
-    time: Math.floor(Date.parse(d.open_time_utc) / 1000) as UTCTimestamp,
+    time: toSeconds(d.open_time_utc),
     value: d.volume,
     color: d.close >= d.open ? UP_VOL : DOWN_VOL,
   };
@@ -86,17 +87,42 @@ function toLegend(d: CandleData): Legend {
   };
 }
 
+// Build a forecast line series that connects from the last actual close so the
+// dashed projection visibly continues the candles. `pick` selects which forecast
+// field to plot (central close or a band edge).
+function forecastLine(
+  last: CandleData | undefined,
+  forecast: ForecastPoint[],
+  pick: (f: ForecastPoint) => number,
+): LineData<UTCTimestamp>[] {
+  if (!last) return [];
+  const anchorTime = toSeconds(last.open_time_utc);
+  // Only keep forecast points strictly after the last actual bar, sorted ascending —
+  // lightweight-charts requires monotonic time. A stale forecast (all points at or
+  // before the latest candle) yields an empty overlay instead of a crash.
+  const pts = forecast
+    .map(f => ({ time: toSeconds(f.forecast_time_utc), value: pick(f) }))
+    .filter(p => p.time > anchorTime)
+    .sort((a, b) => a.time - b.time);
+  if (pts.length === 0) return [];
+  return [{ time: anchorTime, value: last.close }, ...pts];
+}
+
 export default function AssetChart() {
   const [symbol, setSymbol] = useState('BTCUSDT');
   const [interval, setInterval] = useState('1h');
   const [loading, setLoading] = useState(false);
   const [count, setCount] = useState(0);
   const [legend, setLegend] = useState<Legend | null>(null);
+  const [hasForecast, setHasForecast] = useState(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const forecastRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const bandLowRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const bandHighRef = useRef<ISeriesApi<'Line'> | null>(null);
   const lastBarRef = useRef<Legend | null>(null);
 
   // Create the chart once on mount; tear it down on unmount.
@@ -137,6 +163,25 @@ export default function AssetChart() {
     });
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
+    const bandCommon = {
+      color: BAND,
+      lineWidth: 1 as const,
+      lineStyle: LineStyle.Dashed,
+      lastValueVisible: false,
+      priceLineVisible: false,
+      crosshairMarkerVisible: false,
+    };
+    const bandLow = chart.addSeries(LineSeries, bandCommon);
+    const bandHigh = chart.addSeries(LineSeries, bandCommon);
+    const forecast = chart.addSeries(LineSeries, {
+      color: FORECAST,
+      lineWidth: 2,
+      lineStyle: LineStyle.Dashed,
+      lastValueVisible: false,
+      priceLineVisible: false,
+      crosshairMarkerVisible: false,
+    });
+
     chart.subscribeCrosshairMove((param) => {
       const c = param.seriesData.get(candle) as CandlestickData<UTCTimestamp> | undefined;
       if (!param.time || !param.point || !c) {
@@ -158,29 +203,54 @@ export default function AssetChart() {
     chartRef.current = chart;
     candleRef.current = candle;
     volumeRef.current = volume;
+    forecastRef.current = forecast;
+    bandLowRef.current = bandLow;
+    bandHighRef.current = bandHigh;
 
     return () => {
       chart.remove();
       chartRef.current = null;
       candleRef.current = null;
       volumeRef.current = null;
+      forecastRef.current = null;
+      bandLowRef.current = null;
+      bandHighRef.current = null;
     };
   }, []);
 
-  // Reload data whenever the symbol or interval changes.
+  // Reload candles + forecast whenever the symbol or interval changes.
   useEffect(() => {
     setLoading(true);
     let cancelled = false;
 
-    getCandles(symbol, interval, 200)
-      .then((res) => {
+    Promise.all([
+      getCandles(symbol, interval, 200),
+      getForecast(symbol, interval).catch(() => ({ data: [] as ForecastPoint[] })),
+    ])
+      .then(([candleRes, forecastRes]) => {
         if (cancelled) return;
-        const clean = dedupeSorted(res.data);
+        const clean = dedupeSorted(candleRes.data);
         candleRef.current?.setData(clean.map(toCandle));
         volumeRef.current?.setData(clean.map(toVolume));
+
+        const last = clean[clean.length - 1];
+        const fc = forecastRes.data ?? [];
+        // Isolate forecast rendering so a forecast issue can never wipe the candles.
+        try {
+          const line = forecastLine(last, fc, f => f.pred_close);
+          forecastRef.current?.setData(line);
+          bandLowRef.current?.setData(forecastLine(last, fc, f => f.pred_close_low));
+          bandHighRef.current?.setData(forecastLine(last, fc, f => f.pred_close_high));
+          setHasForecast(line.length > 0);
+        } catch {
+          forecastRef.current?.setData([]);
+          bandLowRef.current?.setData([]);
+          bandHighRef.current?.setData([]);
+          setHasForecast(false);
+        }
+
         chartRef.current?.timeScale().fitContent();
         setCount(clean.length);
-        const last = clean[clean.length - 1];
         lastBarRef.current = last ? toLegend(last) : null;
         setLegend(lastBarRef.current);
       })
@@ -188,6 +258,10 @@ export default function AssetChart() {
         if (cancelled) return;
         candleRef.current?.setData([]);
         volumeRef.current?.setData([]);
+        forecastRef.current?.setData([]);
+        bandLowRef.current?.setData([]);
+        bandHighRef.current?.setData([]);
+        setHasForecast(false);
         setCount(0);
         lastBarRef.current = null;
         setLegend(null);
@@ -254,6 +328,13 @@ export default function AssetChart() {
           </div>
         )}
       </div>
+
+      {hasForecast && (
+        <div className="mt-2 flex items-center gap-2 text-xs text-amber-500/80">
+          <span className="inline-block h-0.5 w-4 border-t-2 border-dashed border-amber-500" />
+          Experimental Kronos forecast (dashed) with uncertainty band — not financial advice.
+        </div>
+      )}
     </div>
   );
 }

@@ -56,6 +56,29 @@ export interface QualityBreak {
   suggested_action: string;
 }
 
+export interface ForecastPoint {
+  symbol: string;
+  interval: string;
+  generated_at_utc: string;
+  forecast_time_utc: string;
+  step: number;
+  pred_open: number;
+  pred_high: number;
+  pred_low: number;
+  pred_close: number;
+  pred_volume: number;
+  pred_close_low: number;
+  pred_close_high: number;
+}
+
+export interface ForecastResponse {
+  symbol: string;
+  interval: string;
+  count: number;
+  generated_at_utc: string | null;
+  data: ForecastPoint[];
+}
+
 export interface AssistantResponse {
   question: string;
   answer: string;
@@ -85,6 +108,12 @@ export async function getCandles(symbol: string, interval: string = '1h', limit:
 export async function getDailyMetrics(symbol: string, limit: number = 90) {
   return fetchApi<{ symbol: string; count: number; data: DailyMetric[] }>(
     `/analytics/daily-metrics?symbol=${symbol}&limit=${limit}`
+  );
+}
+
+export async function getForecast(symbol: string, interval: string = '1h') {
+  return fetchApi<ForecastResponse>(
+    `/predictions/forecast?symbol=${symbol}&interval=${interval}`
   );
 }
 
