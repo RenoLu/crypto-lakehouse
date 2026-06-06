@@ -1,0 +1,50 @@
+name: Refresh backtest snapshot
+
+# Walk-forward accuracy backtest (heavy: re-runs Kronos at ~96 past anchors per
+# series). Runs weekly on a free runner and commits the gold backtest tables so
+# Render can serve /backtest/* read-only.
+
+on:
+  schedule:
+    - cron: "0 6 * * 0"   # Sundays 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: backtest
+  cancel-in-progress: false
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Cache Hugging Face weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-kronos-small-v1
+      - name: Install (with predict extra)
+        run: pip install -e ".[predict]"
+      - name: Build backtest
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python scripts/build_backtest.py
+      - name: Commit snapshot to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f data/lakehouse/gold/asset_backtest_forecasts data/lakehouse/gold/asset_backtest_metrics data/lakehouse/gold/asset_backtest_horizon
+          if git diff --cached --quiet; then
+            echo "No backtest changes to commit."
+          else
+            git commit -m "chore(data): refresh backtest snapshot [skip ci]"
+            git push
+          fi
