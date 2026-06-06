@@ -77,7 +77,8 @@ def _build_series_inputs(silver_root: Path):
                 continue
 
             x_df = sdf.select(PRICE_COLS).to_pandas()
-            x_ts = pd.Series(pd.to_datetime(sdf["open_time_utc"].to_list(), utc=True))
+            # format="ISO8601" tolerates mixed precision (with/without microseconds)
+            x_ts = pd.Series(pd.to_datetime(sdf["open_time_utc"].to_list(), utc=True, format="ISO8601"))
             last = x_ts.iloc[-1]
             y_ts = pd.Series([last + delta * (i + 1) for i in range(horizon)])
 

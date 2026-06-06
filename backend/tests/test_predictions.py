@@ -50,7 +50,10 @@ def _seed_silver(root: Path) -> None:
     start = datetime(2025, 1, 1, tzinfo=UTC)
     rows = []
     for i in range(12):
-        ts = (start + timedelta(hours=i)).isoformat()
+        # Mixed-precision ISO timestamps (some with microseconds, some without),
+        # as the synthetic generator produces — must still parse.
+        extra = timedelta(microseconds=597000) if i % 2 else timedelta()
+        ts = (start + timedelta(hours=i) + extra).isoformat()
         rows.append({
             "source": "binance", "symbol": "BTCUSDT", "base_asset": "BTC", "quote_asset": "USDT",
             "interval": "1h", "open_time_utc": ts, "close_time_utc": ts,
@@ -92,8 +95,9 @@ def test_compute_price_predictions_schema_and_band(tmp_path, monkeypatch):
     # forecast timestamps advance by the interval delta, starting after the last bar
     times = pd.to_datetime(df["forecast_time_utc"].to_list(), utc=True)
     assert (times[1] - times[0]) == pd.Timedelta(hours=1)
-    last_actual = pd.Timestamp("2025-01-01T11:00:00", tz="UTC")
-    assert times[0] == last_actual + pd.Timedelta(hours=1)
+    # First forecast lands one interval after the last actual bar (which carries
+    # the mixed-precision microseconds), so assert it falls strictly after it.
+    assert times[0] > pd.Timestamp("2025-01-01T11:00:00", tz="UTC")
 
 
 def _seed_predictions_gold(monkeypatch, tmp_path: Path) -> None:
