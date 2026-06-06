@@ -123,9 +123,16 @@ def build_silver_for_symbol_interval(
 
     df = transform_klines_to_silver(symbol, interval, klines, ingestion_time=dt)
 
-    # Silver is fully derived from bronze. Clear any prior silver for this
-    # symbol/interval (including stale run-date partitions) so each rebuild
-    # produces one deduplicated snapshot instead of accumulating duplicates.
-    shutil.rmtree(silver_symbol_interval_dir(symbol, interval), ignore_errors=True)
+    # Silver is fully derived from bronze. Write the fresh (deduplicated) snapshot
+    # first, then prune any *other* run-date partitions for this symbol/interval.
+    # Writing before deleting avoids a window where a concurrent reader (e.g. the
+    # API during background polling) sees no silver data for the symbol.
+    output = write_silver_candles(symbol, interval, df, dt=dt)
 
-    return write_silver_candles(symbol, interval, df, dt=dt)
+    base = silver_symbol_interval_dir(symbol, interval)
+    if base.exists():
+        for child in base.iterdir():
+            if child.is_dir() and child != output.parent:
+                shutil.rmtree(child, ignore_errors=True)
+
+    return output
