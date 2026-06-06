@@ -38,6 +38,10 @@ jobs:
         run: pip install -e ".[predict]"
 
       - name: Build snapshot (synthetic data + Kronos forecast)
+        env:
+          # Authenticated HF downloads avoid the anonymous 429 rate limit on
+          # cloud-runner IPs. Add a free read token as the HF_TOKEN repo secret.
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python scripts/seed_demo_data.py
           python scripts/generate_synthetic_data.py
