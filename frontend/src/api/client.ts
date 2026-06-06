@@ -165,3 +165,32 @@ export async function triggerPipeline() {
     errors: string[];
   }>;
 }
+
+export interface BacktestStep { t: string; pred: number; lo: number; hi: number; }
+export interface BacktestCandle { t: string; o: number; h: number; l: number; c: number; }
+export interface BacktestAnchor {
+  anchor_id: number;
+  anchor_time_utc: string;
+  anchor_close: number;
+  dir: boolean;
+  mape: number;
+  coverage: number;
+  candles: BacktestCandle[];
+  forecast: BacktestStep[];
+}
+export interface BacktestReplay {
+  symbol: string; interval: string; supported: boolean; anchors: BacktestAnchor[];
+}
+export interface BacktestHorizonPoint { step: number; mae_pct: number; coverage: number; }
+export interface BacktestMetrics {
+  symbol: string; interval: string; supported: boolean; n_anchors: number;
+  directional_pct: number; mape: number; band_coverage: number; band_nominal: number;
+  horizon: BacktestHorizonPoint[];
+}
+
+export async function getBacktestReplay(symbol: string, interval: string) {
+  return fetchApi<BacktestReplay>(`/backtest/replay?symbol=${symbol}&interval=${interval}`);
+}
+export async function getBacktestMetrics(symbol: string, interval: string) {
+  return fetchApi<BacktestMetrics>(`/backtest/metrics?symbol=${symbol}&interval=${interval}`);
+}
