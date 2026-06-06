@@ -156,16 +156,21 @@ def compute_price_predictions(silver_root: Path) -> pl.DataFrame:
                         )
                         for _ in range(n_samples)
                     ]
+                    scale = settings.prediction_band_scale_map.get(interval, 1.0)
                     for i, (symbol, _) in enumerate(metas):
                         def stack(col: str, idx=i) -> np.ndarray:
                             return np.stack([passes[p][idx][col].to_numpy() for p in range(n_samples)])
 
                         closes = stack("close")
+                        central = np.median(closes, axis=0)
+                        # Widen the percentile band around the central path to the
+                        # empirically-calibrated coverage (see prediction_band_scales).
+                        blo = central - scale * (central - np.quantile(closes, q_lo, axis=0))
+                        bhi = central + scale * (np.quantile(closes, q_hi, axis=0) - central)
                         _emit(rows, symbol, interval, mode, lookback, generated_at, y_tss[i], horizon,
                               np.median(stack("open"), axis=0), np.median(stack("high"), axis=0),
-                              np.median(stack("low"), axis=0), np.median(closes, axis=0),
-                              np.median(stack("volume"), axis=0),
-                              np.quantile(closes, q_lo, axis=0), np.quantile(closes, q_hi, axis=0))
+                              np.median(stack("low"), axis=0), central,
+                              np.median(stack("volume"), axis=0), blo, bhi)
             logger.info(f"{interval} lookback={lookback}: {modes} ({len(metas)} series, horizon {horizon})")
 
     logger.info(f"Computed {len(rows)} prediction rows")

@@ -72,6 +72,7 @@ def test_sampled_band_and_dims(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "prediction_sample_count", 5)
     monkeypatch.setattr(settings, "prediction_band_low", 0.1)
     monkeypatch.setattr(settings, "prediction_band_high", 0.9)
+    monkeypatch.setattr(settings, "prediction_band_scales", "")  # isolate from calibration widening
     monkeypatch.setattr(predictions, "get_predictor", lambda: _StubPredictor())
     _seed_silver(tmp_path / "silver")
 
@@ -84,6 +85,29 @@ def test_sampled_band_and_dims(tmp_path, monkeypatch):
         assert r["pred_close"] == pytest.approx(102.0)  # median of [100..104]
         assert r["pred_close_low"] > 100.0   # 10th percentile, not the min
         assert r["pred_close_high"] < 104.0  # 90th percentile, not the max
+
+
+def test_band_scale_widens_band(tmp_path, monkeypatch):
+    """A per-interval band scale widens the band around the central path (the
+    empirical calibration to ~80% coverage)."""
+    _base(monkeypatch)
+    monkeypatch.setattr(settings, "prediction_modes", "sampled")
+    monkeypatch.setattr(settings, "prediction_sample_count", 5)
+    monkeypatch.setattr(settings, "prediction_band_low", 0.1)
+    monkeypatch.setattr(settings, "prediction_band_high", 0.9)
+    monkeypatch.setattr(settings, "prediction_band_scales", "1h:5.0")  # 5x widening
+    monkeypatch.setattr(predictions, "get_predictor", lambda: _StubPredictor())
+    _seed_silver(tmp_path / "silver")
+
+    df = compute_price_predictions(tmp_path / "silver")
+
+    for r in df.iter_rows(named=True):
+        central = r["pred_close"]
+        assert central == pytest.approx(102.0)
+        # raw 10/90 percentiles of [100..104] are 100.4 / 103.6; widened 5x around 102
+        assert r["pred_close_low"] == pytest.approx(102.0 - 5 * (102.0 - 100.4))   # 94.0
+        assert r["pred_close_high"] == pytest.approx(102.0 + 5 * (103.6 - 102.0))  # 110.0
+        assert r["pred_close_low"] < central < r["pred_close_high"]
 
 
 def test_deterministic_mode_no_band(tmp_path, monkeypatch):

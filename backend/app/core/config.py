@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     prediction_band_high: float = 0.9  # upper quantile for the uncertainty band
     prediction_lookbacks: str = "256,512"  # selectable lookback presets (precomputed per variant)
     prediction_modes: str = "sampled,deterministic"  # selectable forecast modes
+    # Empirical band widening per interval: Kronos' low-T sample spread is badly
+    # overconfident (~26% coverage at 1h), so we widen the band around the central
+    # path to hit ~80% historical coverage. Factors derived from the walk-forward
+    # backtest residuals; intervals not listed default to 1.0 (uncalibrated).
+    prediction_band_scales: str = "1h:7.0,1d:6.3"
 
     # Backtest (walk-forward accuracy; uses the `predict` extra, run in CI)
     backtest_intervals: str = "1h,1d"   # scope: skip 1m/5m
@@ -86,6 +91,17 @@ class Settings(BaseSettings):
     @property
     def backtest_interval_list(self) -> list[str]:
         return [i.strip() for i in self.backtest_intervals.split(",") if i.strip()]
+
+    @property
+    def prediction_band_scale_map(self) -> dict[str, float]:
+        out: dict[str, float] = {}
+        for part in self.prediction_band_scales.split(","):
+            key, _, val = part.strip().partition(":")
+            try:
+                out[key.strip()] = float(val)
+            except ValueError:
+                continue
+        return out
 
     @property
     def lakehouse_path(self) -> Path:

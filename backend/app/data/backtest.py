@@ -142,6 +142,7 @@ def compute_backtest(silver_root: Path):
     f_rows, m_rows, h_rows = [], [], []
     for interval in settings.backtest_interval_list:
         horizon = horizon_map.get(interval, settings.prediction_horizon)
+        scale = settings.prediction_band_scale_map.get(interval, 1.0)
         for symbol in settings.symbols:
             sdf = (full.filter((pl.col("symbol") == symbol) & (pl.col("interval") == interval))
                    .sort("open_time_utc"))
@@ -165,6 +166,9 @@ def compute_backtest(silver_root: Path):
                 pred = np.median(stack, axis=0)
                 lo = np.quantile(stack, q_lo, axis=0)
                 hi = np.quantile(stack, q_hi, axis=0)
+                # Calibrated band widening (see prediction_band_scales).
+                lo = pred - scale * (pred - lo)
+                hi = pred + scale * (hi - pred)
                 per.append({"pred": pred, "lo": lo, "hi": hi, "actual": mt["actual"],
                             "anchor_close": mt["anchor_close"]})
                 for s in range(horizon):
