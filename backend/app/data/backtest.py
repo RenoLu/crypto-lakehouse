@@ -49,6 +49,8 @@ def select_anchors(n_bars: int, lookback: int, horizon: int, n_anchors: int) -> 
     if hi < lo:
         return []
     span = hi - lo
+    if n_anchors <= 1:
+        return [lo + span // 2]
     if span + 1 <= n_anchors:
         return list(range(lo, hi + 1))
     return sorted({int(round(lo + span * i / (n_anchors - 1))) for i in range(n_anchors)})
