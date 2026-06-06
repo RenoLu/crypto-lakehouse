@@ -44,118 +44,129 @@ PREDICTION_SCHEMA = {
 MIN_HISTORY = 2  # need at least a couple of bars to normalize/forecast
 
 
-def _build_series_inputs(silver_root: Path):
-    """Return parallel lists (meta, x_df, x_timestamp, y_timestamp) for every
-    symbol/interval that has enough history, plus the per-series y timestamps."""
-    all_files = list((silver_root / "market_candles").rglob("*.parquet"))
-    if not all_files:
-        logger.warning("No silver parquet files found for predictions")
+def _build_interval_inputs(full: pl.DataFrame, interval: str, lookback: int, horizon: int):
+    """Build batchable inputs (metas, x_dfs, x_timestamps, y_timestamps) for a
+    single interval — every symbol shares the same horizon, so they can be
+    forecast together in one predict_batch call."""
+    delta = INTERVAL_DELTA.get(interval)
+    if delta is None:
+        logger.warning(f"Unsupported prediction interval {interval}; skipping")
         return [], [], [], []
-
-    full = pl.scan_parquet([str(f) for f in all_files]).collect()
-    if full.is_empty():
-        return [], [], [], []
-
-    horizon = settings.prediction_horizon
-    lookback = settings.prediction_lookback
 
     metas, x_dfs, x_tss, y_tss = [], [], [], []
     for symbol in settings.symbols:
-        for interval in settings.prediction_interval_list:
-            delta = INTERVAL_DELTA.get(interval)
-            if delta is None:
-                logger.warning(f"Unsupported prediction interval {interval}; skipping")
-                continue
+        sdf = (
+            full.filter((pl.col("symbol") == symbol) & (pl.col("interval") == interval))
+            .sort("open_time_utc")
+            .tail(lookback)
+        )
+        if sdf.height < MIN_HISTORY:
+            logger.warning(f"Not enough history for {symbol}/{interval} ({sdf.height} rows); skipping")
+            continue
 
-            sdf = (
-                full.filter((pl.col("symbol") == symbol) & (pl.col("interval") == interval))
-                .sort("open_time_utc")
-                .tail(lookback)
-            )
-            if sdf.height < MIN_HISTORY:
-                logger.warning(f"Not enough history for {symbol}/{interval} ({sdf.height} rows); skipping")
-                continue
+        x_df = sdf.select(PRICE_COLS).to_pandas()
+        # format="ISO8601" tolerates mixed precision (with/without microseconds)
+        x_ts = pd.Series(pd.to_datetime(sdf["open_time_utc"].to_list(), utc=True, format="ISO8601"))
+        last = x_ts.iloc[-1]
+        y_ts = pd.Series([last + delta * (i + 1) for i in range(horizon)])
 
-            x_df = sdf.select(PRICE_COLS).to_pandas()
-            # format="ISO8601" tolerates mixed precision (with/without microseconds)
-            x_ts = pd.Series(pd.to_datetime(sdf["open_time_utc"].to_list(), utc=True, format="ISO8601"))
-            last = x_ts.iloc[-1]
-            y_ts = pd.Series([last + delta * (i + 1) for i in range(horizon)])
-
-            metas.append((symbol, interval))
-            x_dfs.append(x_df)
-            x_tss.append(x_ts)
-            y_tss.append(y_ts)
+        metas.append((symbol, interval))
+        x_dfs.append(x_df)
+        x_tss.append(x_ts)
+        y_tss.append(y_ts)
 
     return metas, x_dfs, x_tss, y_tss
 
 
 def compute_price_predictions(silver_root: Path) -> pl.DataFrame:
-    """Forecast the next `prediction_horizon` bars for each configured
-    symbol/interval and return a tidy DataFrame of predictions with an
-    uncertainty band derived from independent stochastic passes."""
-    metas, x_dfs, x_tss, y_tss = _build_series_inputs(silver_root)
-    if not metas:
+    """Forecast each configured symbol/interval with Kronos and return a tidy
+    DataFrame. Uses low-temperature Monte-Carlo sampling and robust statistics:
+    the median for the central path and quantiles for the uncertainty band, so
+    the band stays calibrated instead of ballooning on outlier trajectories."""
+    all_files = list((silver_root / "market_candles").rglob("*.parquet"))
+    if not all_files:
+        logger.warning("No silver parquet files found for predictions")
         return pl.DataFrame(schema=PREDICTION_SCHEMA)
 
-    # predict_batch needs equal historical length across the batch.
-    common = min(len(x) for x in x_dfs)
-    x_dfs = [x.iloc[-common:].reset_index(drop=True) for x in x_dfs]
-    x_tss = [t.iloc[-common:].reset_index(drop=True) for t in x_tss]
+    full = pl.scan_parquet([str(f) for f in all_files]).collect()
+    if full.is_empty():
+        return pl.DataFrame(schema=PREDICTION_SCHEMA)
 
-    horizon = settings.prediction_horizon
+    lookback = settings.prediction_lookback
     n_samples = max(1, settings.prediction_sample_count)
+    temperature = settings.prediction_temperature
+    top_p = settings.prediction_top_p
+    q_lo = settings.prediction_band_low
+    q_hi = settings.prediction_band_high
+    horizon_map = settings.prediction_horizon_map
+    default_horizon = settings.prediction_horizon
 
     predictor = get_predictor()
-
-    # Run N independent single-sample passes to build a Monte-Carlo band.
-    passes = []
-    for p in range(n_samples):
-        preds = predictor.predict_batch(
-            df_list=x_dfs,
-            x_timestamp_list=x_tss,
-            y_timestamp_list=y_tss,
-            pred_len=horizon,
-            T=1.0,
-            top_k=0,
-            top_p=0.9,
-            sample_count=1,
-            verbose=False,
-        )
-        passes.append(preds)
-        logger.info(f"Prediction pass {p + 1}/{n_samples} complete ({len(metas)} series)")
-
     generated_at = datetime.now(UTC).isoformat()
-    rows = []
-    for i, (symbol, interval) in enumerate(metas):
-        opens = np.stack([passes[p][i]["open"].to_numpy() for p in range(n_samples)])
-        highs = np.stack([passes[p][i]["high"].to_numpy() for p in range(n_samples)])
-        lows = np.stack([passes[p][i]["low"].to_numpy() for p in range(n_samples)])
-        closes = np.stack([passes[p][i]["close"].to_numpy() for p in range(n_samples)])
-        vols = np.stack([passes[p][i]["volume"].to_numpy() for p in range(n_samples)])
+    rows: list[dict] = []
 
-        mean_close = closes.mean(axis=0)
-        low_close = closes.min(axis=0)
-        high_close = closes.max(axis=0)
-        y_ts = y_tss[i]
+    # Forecast one interval at a time: same horizon per interval keeps the batch
+    # valid and lets each interval use its own (bounded) horizon.
+    for interval in settings.prediction_interval_list:
+        horizon = horizon_map.get(interval, default_horizon)
+        metas, x_dfs, x_tss, y_tss = _build_interval_inputs(full, interval, lookback, horizon)
+        if not metas:
+            continue
 
-        for step in range(horizon):
-            rows.append({
-                "symbol": symbol,
-                "interval": interval,
-                "generated_at_utc": generated_at,
-                "forecast_time_utc": y_ts.iloc[step].isoformat(),
-                "step": step + 1,
-                "pred_open": float(opens[:, step].mean()),
-                "pred_high": float(highs[:, step].mean()),
-                "pred_low": float(lows[:, step].mean()),
-                "pred_close": float(mean_close[step]),
-                "pred_volume": float(vols[:, step].mean()),
-                "pred_close_low": float(low_close[step]),
-                "pred_close_high": float(high_close[step]),
-            })
+        # predict_batch needs equal historical length across the batch.
+        common = min(len(x) for x in x_dfs)
+        x_dfs = [x.iloc[-common:].reset_index(drop=True) for x in x_dfs]
+        x_tss = [t.iloc[-common:].reset_index(drop=True) for t in x_tss]
 
-    logger.info(f"Computed {len(rows)} prediction rows for {len(metas)} series")
+        # Monte-Carlo: independent low-temperature single-sample trajectories.
+        passes = []
+        for _ in range(n_samples):
+            passes.append(
+                predictor.predict_batch(
+                    df_list=x_dfs,
+                    x_timestamp_list=x_tss,
+                    y_timestamp_list=y_tss,
+                    pred_len=horizon,
+                    T=temperature,
+                    top_k=0,
+                    top_p=top_p,
+                    sample_count=1,
+                    verbose=False,
+                )
+            )
+        logger.info(f"{interval}: {n_samples} samples x {len(metas)} series (horizon {horizon})")
+
+        for i, (symbol, _) in enumerate(metas):
+            def stack(col: str) -> np.ndarray:
+                return np.stack([passes[p][i][col].to_numpy() for p in range(n_samples)])
+
+            med_open = np.median(stack("open"), axis=0)
+            med_high = np.median(stack("high"), axis=0)
+            med_low = np.median(stack("low"), axis=0)
+            med_vol = np.median(stack("volume"), axis=0)
+            closes = stack("close")
+            med_close = np.median(closes, axis=0)
+            band_low = np.quantile(closes, q_lo, axis=0)
+            band_high = np.quantile(closes, q_hi, axis=0)
+            y_ts = y_tss[i]
+
+            for step in range(horizon):
+                rows.append({
+                    "symbol": symbol,
+                    "interval": interval,
+                    "generated_at_utc": generated_at,
+                    "forecast_time_utc": y_ts.iloc[step].isoformat(),
+                    "step": step + 1,
+                    "pred_open": float(med_open[step]),
+                    "pred_high": float(med_high[step]),
+                    "pred_low": float(med_low[step]),
+                    "pred_close": float(med_close[step]),
+                    "pred_volume": float(med_vol[step]),
+                    "pred_close_low": float(band_low[step]),
+                    "pred_close_high": float(band_high[step]),
+                })
+
+    logger.info(f"Computed {len(rows)} prediction rows")
     return pl.DataFrame(rows, schema=PREDICTION_SCHEMA)
 
 

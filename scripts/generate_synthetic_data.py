@@ -29,8 +29,13 @@ INTERVAL_MINUTES = {"1m": 1, "5m": 5, "1h": 60, "1d": 1440}
 def generate_klines(symbol: str, interval: str, count: int = 1000) -> list[dict]:
     config = SYMBOL_PRICES[symbol]
     minutes = INTERVAL_MINUTES[interval]
-    price = config["base"]
-    vol = config["volatility"]
+    base = config["base"]
+    price = base
+    # Treat the configured volatility as a *daily* figure and scale per bar by
+    # sqrt-of-time, so a 1m bar moves far less than a 1d bar (realistic), instead
+    # of a flat 2% on every interval.
+    vol = config["volatility"] * (minutes / 1440.0) ** 0.5
+    reversion = 0.01  # mild mean reversion toward base keeps the 1000-step walk bounded
 
     now = datetime.now(timezone.utc)
     start = now - timedelta(minutes=minutes * count)
@@ -41,7 +46,8 @@ def generate_klines(symbol: str, interval: str, count: int = 1000) -> list[dict]
         open_time = int(ts.timestamp() * 1000)
         close_time = int((ts + timedelta(minutes=minutes)).timestamp() * 1000)
 
-        change = random.gauss(0, vol)
+        drift = reversion * (base - price) / price  # pull back toward base
+        change = drift + random.gauss(0, vol)
         o = price
         c = price * (1 + change)
         h = max(o, c) * (1 + abs(random.gauss(0, vol * 0.5)))

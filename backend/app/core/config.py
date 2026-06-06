@@ -25,10 +25,15 @@ class Settings(BaseSettings):
     predictions_enabled: bool = False
     prediction_model: str = "NeoQuasar/Kronos-small"
     prediction_tokenizer: str = "NeoQuasar/Kronos-Tokenizer-base"
-    prediction_intervals: str = "1h,1d"
-    prediction_horizon: int = 24
+    prediction_intervals: str = "1m,5m,1h,1d"
+    prediction_horizon: int = 24  # fallback when an interval isn't in prediction_horizons
+    prediction_horizons: str = "1m:30,5m:24,1h:24,1d:14"
     prediction_lookback: int = 400
-    prediction_sample_count: int = 5
+    prediction_sample_count: int = 16  # Monte-Carlo samples per series (balances band quality vs CI time)
+    prediction_temperature: float = 0.6  # lower = more stable / less divergent
+    prediction_top_p: float = 0.9
+    prediction_band_low: float = 0.1  # lower quantile for the uncertainty band
+    prediction_band_high: float = 0.9  # upper quantile for the uncertainty band
 
     @property
     def symbols(self) -> list[str]:
@@ -41,6 +46,17 @@ class Settings(BaseSettings):
     @property
     def prediction_interval_list(self) -> list[str]:
         return [i.strip() for i in self.prediction_intervals.split(",")]
+
+    @property
+    def prediction_horizon_map(self) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for part in self.prediction_horizons.split(","):
+            key, _, val = part.strip().partition(":")
+            try:
+                out[key.strip()] = int(val)
+            except ValueError:
+                continue
+        return out
 
     @property
     def lakehouse_path(self) -> Path:
