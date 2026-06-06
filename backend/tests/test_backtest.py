@@ -1,4 +1,5 @@
 import numpy as np
+import polars as pl
 import pytest
 
 pd = pytest.importorskip("pandas")  # part of the [predict] extra
@@ -50,3 +51,54 @@ def test_aggregate_metrics_and_horizon_curve():
     assert [h["step"] for h in horizon] == [1, 2]
     # step1 errors: |101-101|/101=0, |99-99|/99=0 -> mae_pct 0
     assert horizon[0]["mae_pct"] == pytest.approx(0.0)
+
+
+def _make_silver(tmp_path, symbols=("BTCUSDT",), interval="1h", n=400):
+    """Write a tiny silver parquet dataset shaped like market_candles."""
+    base = tmp_path / "silver" / "market_candles"
+    for sym in symbols:
+        d = base / "source=binance" / f"symbol={sym}" / f"interval={interval}" / "date=2026-01-01"
+        d.mkdir(parents=True, exist_ok=True)
+        ts = pd.date_range("2026-01-01", periods=n, freq="h", tz="UTC")
+        price = np.linspace(100, 140, n)
+        pl.DataFrame({
+            "symbol": [sym] * n, "interval": [interval] * n,
+            "open_time_utc": [t.isoformat() for t in ts],
+            "open": price, "high": price + 1, "low": price - 1, "close": price,
+            "volume": np.full(n, 10.0), "quote_volume": np.full(n, 1000.0), "trade_count": [5] * n,
+        }).write_parquet(str(d / "candles.parquet"))
+    return tmp_path / "silver"
+
+
+class _StubPredictor:
+    """predict_batch returns, per input df, a horizon-length frame trending up
+    from the last close so forecasts are deterministic and torch-free."""
+    def predict_batch(self, df_list, x_timestamp_list, y_timestamp_list, pred_len, **kw):
+        out = []
+        for df in df_list:
+            last = float(df["close"].iloc[-1])
+            vals = np.array([last * (1 + 0.001 * (i + 1)) for i in range(pred_len)])
+            out.append(pd.DataFrame({"open": vals, "high": vals, "low": vals, "close": vals,
+                                     "volume": np.full(pred_len, 10.0)}))
+        return out
+
+
+def test_compute_backtest_produces_three_tables(tmp_path, monkeypatch):
+    monkeypatch.setattr(bt, "get_predictor", lambda: _StubPredictor())
+    monkeypatch.setattr(bt.settings, "backtest_intervals", "1h")
+    monkeypatch.setattr(bt.settings, "default_symbols", "BTCUSDT")
+    monkeypatch.setattr(bt.settings, "backtest_anchors", 10)
+    monkeypatch.setattr(bt.settings, "backtest_lookback", 256)
+    monkeypatch.setattr(bt.settings, "backtest_sample_count", 2)
+
+    silver = _make_silver(tmp_path, n=400)
+    forecasts, metrics, horizon = bt.compute_backtest(silver)
+
+    assert set(forecasts.columns) >= set(bt.FORECASTS_SCHEMA.keys())
+    assert metrics.height == 1  # one (symbol, interval)
+    row = metrics.row(0, named=True)
+    assert 0.0 <= row["directional_pct"] <= 1.0
+    assert row["n_anchors"] == 10
+    assert horizon.height == int(bt.settings.prediction_horizon_map.get("1h", 24))
+    # forecasts carry aligned actuals
+    assert forecasts.filter(pl.col("actual_close").is_null()).height == 0
