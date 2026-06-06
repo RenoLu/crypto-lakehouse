@@ -21,6 +21,7 @@ class DuckDBRepo:
         gold_daily = str(gold_root / "asset_daily_metrics" / "*.parquet")
         gold_exposures = str(gold_root / "portfolio_exposures" / "*.parquet")
         gold_quality = str(gold_root / "data_quality_breaks" / "*.parquet")
+        gold_predictions = str(gold_root / "asset_price_predictions" / "*.parquet")
 
         views = {
             "v_market_candles": f"""
@@ -38,6 +39,10 @@ class DuckDBRepo:
             "v_data_quality_breaks": f"""
                 CREATE OR REPLACE VIEW v_data_quality_breaks AS
                 SELECT * FROM read_parquet('{gold_quality}', hive_partitioning=true)
+            """,
+            "v_asset_price_predictions": f"""
+                CREATE OR REPLACE VIEW v_asset_price_predictions AS
+                SELECT * FROM read_parquet('{gold_predictions}', hive_partitioning=true)
             """,
         }
 

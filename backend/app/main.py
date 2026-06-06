@@ -12,6 +12,7 @@ from app.api.routes_health import router as health_router
 from app.api.routes_market_data import router as market_data_router
 from app.api.routes_polling import router as polling_router
 from app.api.routes_portfolio import router as portfolio_router
+from app.api.routes_predictions import router as predictions_router
 from app.api.routes_quality import router as quality_router
 from app.core.config import settings
 from app.core.logging import logger
@@ -98,6 +99,7 @@ app.include_router(analytics_router, prefix="")
 app.include_router(polling_router, prefix="")
 app.include_router(portfolio_router, prefix="")
 app.include_router(quality_router, prefix="")
+app.include_router(predictions_router, prefix="")
 app.include_router(assistant_router, prefix="")
 
 

@@ -51,6 +51,14 @@ class QualityBreak(BaseModel):
     suggested_action: str
 
 
+class PredictionResponse(BaseModel):
+    symbol: str
+    interval: str
+    count: int
+    generated_at_utc: str | None
+    data: list[dict]
+
+
 class AssistantRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=500)
 

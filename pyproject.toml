@@ -31,9 +31,20 @@ dev = [
     "black>=24.8.0",
     "mypy>=1.11.0",
 ]
+# Price forecasting (Kronos). Heavy + not needed for the base API/serving path,
+# so kept optional. Enable with: pip install -e ".[predict]"
+predict = [
+    "torch>=2.0.0",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "einops>=0.8.0",
+    "huggingface_hub>=0.33.0",
+    "safetensors>=0.6.0",
+    "tqdm>=4.66",
+]
 
 [tool.setuptools]
-packages = ["backend", "backend.app", "backend.app.api", "backend.app.core", "backend.app.data", "backend.app.assistant", "backend.app.models", "backend.tests"]
+packages = ["backend", "backend.app", "backend.app.api", "backend.app.core", "backend.app.data", "backend.app.assistant", "backend.app.models", "backend.app.ml", "backend.app.ml.kronos", "backend.tests"]
 
 [tool.ruff]
 target-version = "py311"

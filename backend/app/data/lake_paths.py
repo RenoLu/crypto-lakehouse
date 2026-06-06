@@ -38,6 +38,10 @@ def gold_quality_breaks_dir() -> Path:
     return settings.gold_path / "data_quality_breaks"
 
 
+def gold_price_predictions_dir() -> Path:
+    return settings.gold_path / "asset_price_predictions"
+
+
 def gold_asset_reference_path() -> Path:
     return settings.silver_path / "asset_reference" / "asset_reference.parquet"
 

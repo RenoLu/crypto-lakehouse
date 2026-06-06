@@ -21,6 +21,15 @@ class Settings(BaseSettings):
     polling_interval_seconds: int = 60
     api_key: str = ""
 
+    # Kronos price prediction (optional; requires the `predict` install extra)
+    predictions_enabled: bool = False
+    prediction_model: str = "NeoQuasar/Kronos-small"
+    prediction_tokenizer: str = "NeoQuasar/Kronos-Tokenizer-base"
+    prediction_intervals: str = "1h,1d"
+    prediction_horizon: int = 24
+    prediction_lookback: int = 400
+    prediction_sample_count: int = 5
+
     @property
     def symbols(self) -> list[str]:
         return [s.strip() for s in self.default_symbols.split(",")]
@@ -28,6 +37,10 @@ class Settings(BaseSettings):
     @property
     def intervals(self) -> list[str]:
         return [i.strip() for i in self.default_intervals.split(",")]
+
+    @property
+    def prediction_interval_list(self) -> list[str]:
+        return [i.strip() for i in self.prediction_intervals.split(",")]
 
     @property
     def lakehouse_path(self) -> Path:

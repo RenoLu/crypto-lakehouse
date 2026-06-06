@@ -1,4 +1,4 @@
-.PHONY: install seed ingest silver gold quality api frontend test demo clean lint format
+.PHONY: install seed ingest silver gold quality predict api frontend test demo clean lint format
 
 # Default Python and commands
 PYTHON ?= python
@@ -24,6 +24,9 @@ gold:
 
 quality:
 	$(PYTHON) scripts/run_quality_checks.py
+
+predict:
+	$(PYTHON) scripts/build_predictions.py
 
 api:
 	$(UVICORN) backend.app.main:app --host 0.0.0.0 --port 8000 --reload

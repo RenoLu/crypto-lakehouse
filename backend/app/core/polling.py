@@ -128,12 +128,27 @@ async def run_pipeline_once() -> dict:
     breaks = run_all_checks(settings.silver_path)
     write_quality_breaks(breaks)
 
+    # Optional Kronos forecasting step. Imported lazily and guarded so a missing
+    # `predict` extra or an inference error never breaks the core pipeline.
+    predictions_written = 0
+    if settings.predictions_enabled:
+        try:
+            from app.data.predictions import compute_price_predictions, write_gold_price_predictions
+
+            preds = compute_price_predictions(settings.silver_path)
+            if not preds.is_empty():
+                write_gold_price_predictions(preds)
+                predictions_written = len(preds)
+        except Exception as e:
+            errors.append(f"Predictions failed: {e}")
+
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "records_ingested": total_records,
         "silver_files": silver_files,
         "gold_datasets": gold_writes,
         "quality_breaks": len(breaks),
+        "predictions": predictions_written,
         "errors": errors[:5],
     }
 
